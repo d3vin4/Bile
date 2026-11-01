@@ -9,6 +9,8 @@ struct BrowserView: View {
     @State private var renameTarget: FileEntry? = nil
     @State private var renameName = ""
     @State private var showRename = false
+    @State private var deleteTarget: FileEntry? = nil
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         NavigationView {
@@ -32,6 +34,13 @@ struct BrowserView: View {
                              + "Setup to list it (the directory is moved to Media temporarily).")
                             .font(.caption)
                             .foregroundStyle(.orange)
+                            .padding(.horizontal)
+                    } else if state.bridgeMode == "bridge_move" {
+                        Text("AirLift mode: every operation moves the file through Media and back. "
+                             + "It takes 15–30 s each and is verified — if an operation cannot be "
+                             + "completed you will see exactly where the file is kept.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                             .padding(.horizontal)
                     }
 
@@ -59,7 +68,10 @@ struct BrowserView: View {
                                 if entry.isDir { state.navigate(into: entry.name) }
                             }
                             .swipeActions {
-                                Button(role: .destructive) { state.deleteEntry(entry) } label: { Label("Delete", systemImage: "trash") }
+                                Button(role: .destructive) {
+                                    deleteTarget = entry
+                                    showDeleteConfirm = true
+                                } label: { Label("Delete", systemImage: "trash") }
                                 Button { renameTarget = entry; renameName = entry.name; showRename = true } label: { Label("Rename", systemImage: "pencil") }
                                 if !entry.isDir {
                                     Button { exportEntry(entry) } label: { Label("Export", systemImage: "square.and.arrow.up") }
@@ -106,6 +118,21 @@ struct BrowserView: View {
                 if let url = state.exportedFileURL {
                     ShareSheet(items: [url])
                 }
+            }
+            .confirmationDialog(
+                deleteTarget.map { "Delete “\($0.name)”?" } ?? "Delete?",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    if let t = deleteTarget { state.deleteEntry(t) }
+                    deleteTarget = nil
+                }
+                Button("Cancel", role: .cancel) { deleteTarget = nil }
+            } message: {
+                Text(deleteTarget?.isDir == true
+                     ? "This folder and everything inside it will be deleted."
+                     : "This file will be deleted.")
             }
         }
     }

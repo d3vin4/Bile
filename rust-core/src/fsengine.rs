@@ -2241,19 +2241,57 @@ async fn recover_leftover_async(
     bridge: String,
     logger: &Logger,
 ) -> Result<(), String> {
-    let (mut tunnel, mut engine) =
-        open_engine(&pairing_path, "", &container_path, &bridge, logger).await?;
-    let dst = engine.path(&rel_path);
-    if engine.afc.get_file_info(&dst).await.is_ok() {
-        return Err("A file or folder with that name already exists at the destination".into());
+    let pairing_bytes = read_pairing(&pairing_path)?;
+    let mut tunnel = exploit::connect_tunnel(&pairing_bytes, logger).await?;
+    let mut afc = tunnel.connect_afc(logger).await?;
+
+    // Recovery always needs a Media-side bridge because ATAirlock only accepts
+    // destinations below Media. Create a throwaway one when the caller has none.
+    let (bridge_name, temporary) = if bridge.is_empty() || !safe_media_name(&bridge) {
+        cleanup_stale_bridges(&mut afc).await;
+        let name = format!("readipa-bridge-{}", exploit::random_hex(6));
+        let made = afc
+            .link(&container_path, &name, LinkType::Symlink)
+            .await
+            .is_ok();
+        let name = if made {
+            name
+        } else {
+            create_bridge_atc(&mut tunnel, &mut afc, &container_path, logger).await?
+        };
+        (name, true)
+    } else {
+        if !bridge_matches(&mut afc, &bridge, &container_path).await? {
+            return Err("Bridge does not point at the requested container".into());
+        }
+        (bridge, false)
+    };
+
+    let dst = format!("{bridge_name}/{rel_path}");
+    let prereq = if afc.get_file_info(&dst).await.is_ok() {
+        Err("A file or folder with that name already exists at the destination".to_string())
+    } else {
+        Ok(())
+    };
+    if let Err(e) = prereq {
+        if temporary {
+            let _ = remove_one(&mut afc, &bridge_name).await;
+        }
+        return Err(e);
     }
-    move_path(
+
+    let result = move_path(
         &mut tunnel,
-        &mut engine.afc,
+        &mut afc,
         &format!("{MEDIA_ROOT}{leftover_name}"),
         &dst,
         logger,
     )
     .await
-    .map_err(|e| format!("could not move the leftover back: {e}"))
+    .map_err(|e| format!("could not move the leftover back: {e}"));
+
+    if temporary {
+        let _ = remove_one(&mut afc, &bridge_name).await;
+    }
+    result
 }
