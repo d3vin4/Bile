@@ -1696,9 +1696,38 @@ async fn fs_write_async(
     }
 
     // 2. Move any existing target aside so nothing is destroyed.
-    let had_existing = move_path(&mut tunnel, &mut engine.afc, &abs, &backup, logger)
+    //    `moved_aside` means we have the previous contents in Media and must
+    //    either delete them (regular file) or put them back.
+    let moved_aside = move_path(&mut tunnel, &mut engine.afc, &abs, &backup, logger)
         .await
         .is_ok();
+    let mut backup_is_plain_file = false;
+
+    if moved_aside {
+        match engine.afc.get_file_info(&backup).await {
+            Ok(info) => {
+                if info.st_ifmt.contains("DIR") {
+                    // A directory must never be replaced by a file: put it back.
+                    let _ = move_path(
+                        &mut tunnel,
+                        &mut engine.afc,
+                        &format!("{MEDIA_ROOT}{backup}"),
+                        &dst_back,
+                        logger,
+                    )
+                    .await;
+                    let _ = remove_one(&mut engine.afc, &pickup).await;
+                    return Err(
+                        "A folder already exists at that name; refusing to replace it".into(),
+                    );
+                }
+                backup_is_plain_file = true;
+            }
+            // Could not inspect it — keep it in Media rather than risk deleting
+            // a directory tree.
+            Err(_) => backup_is_plain_file = false,
+        }
+    }
 
     // 3. Move the staged file into the container.
     let moved = move_path(
@@ -1712,14 +1741,16 @@ async fn fs_write_async(
 
     match moved {
         Ok(()) => {
-            if had_existing {
-                let _ = remove_tree_safe(&mut engine.afc, &backup).await;
+            // Only discard the previous contents when we know they are a plain
+            // file. Anything else stays in Media and shows up under Recovery.
+            if backup_is_plain_file {
+                let _ = remove_one(&mut engine.afc, &backup).await;
             }
             Ok(())
         }
         Err(e) => {
             // Restore the original so the container is left as we found it.
-            let restore = if had_existing {
+            let restore = if moved_aside {
                 match move_path(
                     &mut tunnel,
                     &mut engine.afc,
