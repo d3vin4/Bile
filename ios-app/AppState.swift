@@ -28,8 +28,21 @@ final class AppState: ObservableObject {
     @Published var log: [String] = []
     @Published var exportedFileURL: URL? = nil
     @Published var showShareSheet: Bool = false
+    @Published var bridgeRequiresRiskyMoves = false
+    @Published var leftovers: [FileEntry] = []
+    @Published var allowRiskyMoves: Bool = UserDefaults.standard.bool(forKey: "readipa.allowRiskyMoves") {
+        didSet {
+            UserDefaults.standard.set(allowRiskyMoves, forKey: "readipa.allowRiskyMoves")
+            RustBridge.setAllowRiskyMoves(allowRiskyMoves)
+        }
+    }
 
     enum PairingPhase: Equatable { case idle, pairing }
+
+    init() {
+        // didSet does not fire during initialization.
+        RustBridge.setAllowRiskyMoves(allowRiskyMoves)
+    }
 
     var pairingPath: String { PairingController.pairingFilePath() }
 
@@ -92,10 +105,11 @@ final class AppState: ObservableObject {
         entries = []
         Task {
             do {
-                let (b, m) = try RustBridge.bridgeOpen(pairingPath: pairingPath, containerPath: path)
+                let (b, m, risky) = try RustBridge.bridgeOpen(pairingPath: pairingPath, containerPath: path)
                 await MainActor.run {
                     self.bridge = b
                     self.bridgeMode = m
+                    self.bridgeRequiresRiskyMoves = risky
                 }
                 await loadFiles()
             } catch {
@@ -240,6 +254,59 @@ final class AppState: ObservableObject {
                 await MainActor.run { loadFiles() }
             } catch {
                 await MainActor.run { logLine("Import failed: \(error.localizedDescription)") }
+            }
+        }
+    }
+
+    /// Push the persisted risky-moves preference into the Rust core.
+    func syncRiskyMovesSetting() {
+        RustBridge.setAllowRiskyMoves(allowRiskyMoves)
+    }
+
+    /// List temporary items this app left in /var/mobile/Media. Nothing is ever
+    /// deleted automatically — this is how you notice a failed move.
+    func scanLeftovers() {
+        guard hasPairingFile else { return }
+        Task {
+            do {
+                let list = try RustBridge.mediaLeftovers(pairingPath: pairingPath)
+                let entries = list.map { d in
+                    FileEntry(
+                        id: (d["name"] as? String) ?? UUID().uuidString,
+                        name: (d["name"] as? String) ?? "",
+                        isDir: (d["isDir"] as? Bool) ?? false,
+                        size: (d["size"] as? Int) ?? 0,
+                        modified: (d["modified"] as? String) ?? ""
+                    )
+                }
+                await MainActor.run { self.leftovers = entries }
+            } catch {
+                await MainActor.run { logLine("Recovery scan failed: \(error.localizedDescription)") }
+            }
+        }
+    }
+
+    func recoverLeftover(_ item: FileEntry, toRelPath rel: String) {
+        guard let c = selectedContainer, !rel.isEmpty else {
+            logLine("Open the destination container first, then pick where to restore it")
+            return
+        }
+        Task {
+            do {
+                try RustBridge.recoverLeftover(
+                    pairingPath: pairingPath,
+                    leftoverName: item.name,
+                    containerPath: c.path,
+                    relPath: rel,
+                    bridge: bridge
+                )
+                await MainActor.run {
+                    logLine("Recovered \(item.name) → \(rel) ✅")
+                    scanLeftovers()
+                    loadFiles()
+                }
+            } catch {
+                await MainActor.run { logLine("Recovery failed: \(error.localizedDescription)") }
             }
         }
     }

@@ -259,6 +259,27 @@ int32_t al_fs_rename(const char *pairing_path,
                      void *ctx,
                      char **out_error);
 
+// Opt in to AirLift "move mode", which temporarily relocates a directory to
+// list it. Disabled by default because it moves live app data.
+void al_set_allow_risky_moves(int32_t enabled);
+
+// List readipa-*/airlift-* leftovers in /var/mobile/Media (never deletes them).
+int32_t al_media_leftovers(const char *pairing_path,
+                           ALLogCallback log_cb,
+                           void *ctx,
+                           char **out_json,
+                           char **out_error);
+
+// Move a Media leftover back into a container. Used to repair a failed move.
+int32_t al_recover_leftover(const char *pairing_path,
+                            const char *leftover_name,
+                            const char *container_path,
+                            const char *rel_path,
+                            const char *bridge,
+                            ALLogCallback log_cb,
+                            void *ctx,
+                            char **out_error);
+
 
 #ifdef __cplusplus
 }

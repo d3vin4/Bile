@@ -309,6 +309,67 @@ pub unsafe extern "C" fn al_fs_remove(
 }
 
 #[no_mangle]
+pub extern "C" fn al_set_allow_risky_moves(enabled: i32) {
+    fsengine::set_allow_risky_moves(enabled != 0);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn al_media_leftovers(
+    pairing_path: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        fsengine::media_leftovers(pairing_path, log_cb, ctx, out_json, out_error)
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(e) => {
+            if !out_error.is_null() {
+                *out_error = ffi_util::cstr(format!("Rust panic in al_media_leftovers: {e:?}"));
+            }
+            1
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn al_recover_leftover(
+    pairing_path: *const c_char,
+    leftover_name: *const c_char,
+    container_path: *const c_char,
+    rel_path: *const c_char,
+    bridge: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        fsengine::recover_leftover(
+            pairing_path,
+            leftover_name,
+            container_path,
+            rel_path,
+            bridge,
+            log_cb,
+            ctx,
+            out_error,
+        )
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(e) => {
+            if !out_error.is_null() {
+                *out_error = ffi_util::cstr(format!("Rust panic in al_recover_leftover: {e:?}"));
+            }
+            1
+        }
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn al_fs_rename(
     pairing_path: *const c_char,
     bundle_id: *const c_char,

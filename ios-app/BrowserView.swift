@@ -27,8 +27,22 @@ struct BrowserView: View {
                     }
                     .padding(.horizontal)
 
+                    if state.bridgeRequiresRiskyMoves && !state.allowRiskyMoves {
+                        Text("This container blocks direct access. Enable “Allow risky moves” in "
+                             + "Setup to list it (the directory is moved to Media temporarily).")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal)
+                    }
+
                     if state.isLoadingFiles { ProgressView().padding() }
-                    if let e = state.filesError { Text(e).foregroundStyle(.red).font(.caption).padding() }
+                    if let e = state.filesError {
+                        Text(e)
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                            .padding()
+                            .textSelection(.enabled)
+                    }
 
                     List {
                         ForEach(state.entries) { entry in

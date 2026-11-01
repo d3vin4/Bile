@@ -20,8 +20,20 @@ fn normalize_path(p: &str) -> String {
 }
 
 fn is_allowed_container(p: &str) -> bool {
+    if p.is_empty() || p.contains('\0') {
+        return false;
+    }
     let p = normalize_path(p);
-    p.starts_with(DATA_ROOT) || p.starts_with(GROUP_ROOT)
+    if !p.starts_with('/') || p.split('/').any(|c| c == ".." || c == ".") {
+        return false;
+    }
+    for root in [DATA_ROOT, GROUP_ROOT] {
+        if let Some(rest) = p.strip_prefix(root) {
+            // Require a real "<root>/<uuid>" boundary, not a prefix match.
+            return rest.starts_with('/') && rest.len() > 1;
+        }
+    }
+    false
 }
 
 pub unsafe fn catalog(

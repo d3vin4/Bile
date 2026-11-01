@@ -34,7 +34,52 @@ enum RustBridge {
         return (apps, groups)
     }
 
-    static func bridgeOpen(pairingPath: String, containerPath: String) throws -> (bridge: String, mode: String) {
+    static func setAllowRiskyMoves(_ enabled: Bool) {
+        al_set_allow_risky_moves(enabled ? 1 : 0)
+    }
+
+    static func mediaLeftovers(pairingPath: String) throws -> [[String: Any]] {
+        var outJson: UnsafeMutablePointer<CChar>?
+        var outErr: UnsafeMutablePointer<CChar>?
+        let rc = withCString(pairingPath) { pp in
+            al_media_leftovers(pp, logCallback, nil, &outJson, &outErr)
+        }
+        defer { free(outJson); free(outErr) }
+        if rc != 0 {
+            let msg = outErr.map { String(cString: $0) } ?? "scan failed"
+            throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        guard let json = outJson.map({ String(cString: $0) }),
+              let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = obj["entries"] as? [[String: Any]] else {
+            return []
+        }
+        return entries
+    }
+
+    static func recoverLeftover(pairingPath: String, leftoverName: String, containerPath: String, relPath: String, bridge: String) throws {
+        var outErr: UnsafeMutablePointer<CChar>?
+        let rc = withCString(pairingPath) { pp in
+            withCString(leftoverName) { ln in
+                withCString(containerPath) { cp in
+                    withCString(relPath) { rp in
+                        withCString(bridge) { bp in
+                            al_recover_leftover(pp, ln, cp, rp, bp, logCallback, nil, &outErr)
+                        }
+                    }
+                }
+            }
+        }
+        if rc != 0 {
+            let msg = outErr.map { String(cString: $0) } ?? "recovery failed"
+            free(outErr)
+            throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        free(outErr)
+    }
+
+    static func bridgeOpen(pairingPath: String, containerPath: String) throws -> (bridge: String, mode: String, requiresRiskyMoves: Bool) {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
@@ -54,7 +99,8 @@ enum RustBridge {
         }
         let bridge = (obj["bridge"] as? String) ?? ""
         let mode = (obj["mode"] as? String) ?? "unknown"
-        return (bridge, mode)
+        let risky = (obj["requiresRiskyMoves"] as? Bool) ?? false
+        return (bridge, mode, risky)
     }
 
     static func bridgeClose(pairingPath: String, bridge: String) {

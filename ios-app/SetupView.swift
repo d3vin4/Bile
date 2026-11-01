@@ -60,6 +60,39 @@ struct SetupView: View {
                     if state.isLoadingCatalog { ProgressView() }
                     if let e = state.catalogError { Text(e).foregroundStyle(.red).font(.caption) }
                 }
+
+                Section {
+                    Toggle("Allow risky moves", isOn: $state.allowRiskyMoves)
+                    Text("Containers that block direct access can only be listed by temporarily "
+                         + "relocating a directory to Media. That moves live app data, so it is "
+                         + "off by default. Leave it off unless you need App Group browsing.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("AirLift move mode")
+                }
+
+                Section {
+                    Button("Scan for leftover files") { state.scanLeftovers() }
+                        .disabled(!state.hasPairingFile)
+                    if state.leftovers.isEmpty {
+                        Text("No leftover files").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(state.leftovers) { item in
+                            VStack(alignment: .leading) {
+                                Text(item.name).font(.caption.monospaced())
+                                Text("\(item.size) bytes").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Text("Files this app moved out of a container but could not move back remain in "
+                         + "/var/mobile/Media and are listed here. Nothing is ever deleted "
+                         + "automatically.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Recovery")
+                }
             }
             .navigationTitle("Readipa Setup")
         }
