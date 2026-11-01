@@ -1,7 +1,7 @@
 #!/bin/bash
 # build-ios.sh
-# Builds the Rust FFI static library for iOS and packages AirliftFFI.xcframework.
 set -euo pipefail
+echo "BUILD_IOS_START"
 
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-18.0}"
