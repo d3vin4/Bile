@@ -3,14 +3,15 @@ import SwiftUI
 struct AppsView: View {
     @EnvironmentObject var state: AppState
     @State private var search = ""
-    @State private var showGroups = false
 
     var filteredApps: [AppEntry] {
         let q = search.lowercased()
         if q.isEmpty { return state.apps }
         var result: [AppEntry] = []
         for app in state.apps {
-            if app.name.lowercased().contains(q) || app.bundleId.lowercased().contains(q) {
+            let nameMatch = app.name.lowercased().contains(q)
+            let bundleMatch = app.bundleId.lowercased().contains(q)
+            if nameMatch || bundleMatch {
                 result.append(app)
             }
         }
@@ -19,33 +20,37 @@ struct AppsView: View {
 
     var body: some View {
         NavigationView {
-            List {
-                Section("Applications (\(state.apps.count))") {
-                    ForEach(filteredApps) { app in
-                        NavigationLink(destination: ContainerDetailView(app: app, isGroup: false)) {
-                            AppRow(app: app)
+            AppsListView(apps: filteredApps, groups: state.groups)
+                .searchable(text: $search)
+                .navigationTitle("Apps & Groups")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: { state.loadCatalog() }) {
+                            Image(systemName: "arrow.clockwise")
                         }
                     }
                 }
-                Section("App Groups (\(state.groups.count))") {
-                    ForEach(state.groups) { g in
-                        NavigationLink {
-                            ContainerDetailView(group: g)
-                        } label: {
-                            VStack(alignment: .leading) {
-                                Text(g.id).font(.headline)
-                                Text(g.path).font(.caption2).foregroundStyle(.secondary)
-                                Text("Owners: \(g.owners.joined(separator: ", "))").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
+        }
+    }
+}
+
+struct AppsListView: View {
+    let apps: [AppEntry]
+    let groups: [GroupEntry]
+    var body: some View {
+        List {
+            Section(header: Text("Applications")) {
+                ForEach(apps) { app in
+                    NavigationLink(destination: ContainerDetailView(app: app, isGroup: false)) {
+                        AppRow(app: app)
                     }
                 }
             }
-            .searchable(text: $search)
-            .navigationTitle("Apps & Groups")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { state.loadCatalog() } label: { Image(systemName: "arrow.clockwise") }
+            Section(header: Text("App Groups")) {
+                ForEach(groups) { g in
+                    NavigationLink(destination: ContainerDetailView(group: g)) {
+                        GroupRow(group: g)
+                    }
                 }
             }
         }
@@ -61,6 +66,17 @@ struct AppRow: View {
             if !app.dataContainer.isEmpty {
                 Text(app.dataContainer).font(.caption2).foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+struct GroupRow: View {
+    let group: GroupEntry
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(group.id).font(.headline)
+            Text(group.path).font(.caption2).foregroundStyle(.secondary)
+            Text("Owners: " + group.owners.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
         }
     }
 }
