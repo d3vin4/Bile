@@ -1,4 +1,5 @@
 import Foundation
+import ActivityKit
 import AirliftFFI
 
 /// Drives the RPPairing host: requests Local Network, keeps the app alive while
@@ -16,6 +17,7 @@ final class PairingController: ObservableObject {
     private var netService: NetService?
     private let localNetwork = LocalNetworkAuthorization()
     private let keepAlive = KeepAlive()
+    private var pairingActivity: Activity<PairingActivityAttributes>? = nil
 
     @Published private(set) var running = false
     @Published var pairingStatus: String = "idle"
@@ -132,6 +134,7 @@ final class PairingController: ObservableObject {
     }
 
     func softCancel() {
+        endPairingActivity()
         stopAdvertising()
         keepAlive.stopAll()
         running = false
@@ -220,6 +223,7 @@ final class PairingController: ObservableObject {
     }
 
     private func finish(_ outcome: Outcome) {
+        endPairingActivity()
         stopAdvertising()
         // Keep background alive for 5s so iOS doesn't kill the app before user returns from Settings
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
@@ -265,6 +269,25 @@ final class PairingController: ObservableObject {
     fileprivate func presentPin(_ pin: String) {
         pairingPIN = pin
         pairingStatus = "Enter PIN \(pin) in Settings › Privacy & Security › Developer Mode › Pair with AirCard-iOS"
+        startPairingActivity(pin: pin)
+    }
+
+    private func startPairingActivity(pin: String) {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        let attrs = PairingActivityAttributes(deviceName: "Readipa")
+        let state = PairingActivityAttributes.ContentState(pin: pin, status: "Enter this PIN in Settings › Developer Mode")
+        do {
+            pairingActivity = try Activity.request(attributes: attrs, content: .init(state: state, staleDate: nil), pushType: nil)
+        } catch {
+            // ignore
+        }
+    }
+
+    private func endPairingActivity() {
+        Task {
+            await pairingActivity?.end(nil, dismissalPolicy: .immediate)
+            pairingActivity = nil
+        }
     }
 
     private func stopAdvertising() {

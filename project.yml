@@ -24,6 +24,8 @@ targets:
     dependencies:
       - framework: AirliftFFI.xcframework
         embed: false
+      - target: PairingLiveActivityExtension
+        embed: true
     settings:
       base:
         PRODUCT_NAME: "Readipa"
@@ -32,11 +34,33 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         OTHER_LDFLAGS: "-lc++"
         GENERATE_INFOPLIST_FILE: NO
+        NSSupportsLiveActivities: YES
+
+  PairingLiveActivityExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PairingLiveActivity
+      - path: ios-app/PairingActivityAttributes.swift
+    settings:
+      base:
+        PRODUCT_NAME: "PairingLiveActivity"
+        PRODUCT_BUNDLE_IDENTIFIER: com.d3vin4.readipa.pairingliveactivity
+        INFOPLIST_FILE: PairingLiveActivity/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+    info:
+      path: PairingLiveActivity/Info.plist
+      properties:
+        CFBundleDisplayName: "Pairing Live Activity"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
 
 schemes:
   Readipa:
     build:
       targets:
         Readipa: all
+        PairingLiveActivityExtension: all
     test:
       targets: []
