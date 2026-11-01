@@ -1,0 +1,42 @@
+name: Readipa
+options:
+  bundleIdPrefix: com.d3vin4
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  Readipa:
+    type: application
+    platform: iOS
+    sources:
+      - path: ios-app
+    dependencies:
+      - framework: AirliftFFI.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_NAME: "Readipa"
+        PRODUCT_BUNDLE_IDENTIFIER: com.d3vin4.readipa
+        INFOPLIST_FILE: ios-app/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        OTHER_LDFLAGS: "-lc++"
+        GENERATE_INFOPLIST_FILE: NO
+
+schemes:
+  Readipa:
+    build:
+      targets:
+        Readipa: all
+    test:
+      targets: []
