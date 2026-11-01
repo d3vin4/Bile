@@ -41,7 +41,7 @@ struct AppsListView: View {
         List {
             Section(header: Text("Applications")) {
                 ForEach(apps) { app in
-                    NavigationLink(destination: ContainerDetailView(app: app, isGroup: false)) {
+                    NavigationLink(destination: ContainerDetailView(app: app)) {
                         AppRow(app: app)
                     }
                 }
