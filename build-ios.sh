@@ -6,7 +6,7 @@ echo "BUILD_IOS_START"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-18.0}"
 
-source "$HOME/.cargo/env" 2>/dev/null || true
+export PATH="$HOME/.cargo/bin:$PATH"
 
 export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=/build"
 export CFLAGS="${CFLAGS:-} -ffile-prefix-map=${HOME}=/build"
