@@ -286,11 +286,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    func recoverLeftover(_ item: FileEntry, toRelPath rel: String) {
-        guard let c = selectedContainer, !rel.isEmpty else {
+    /// Restore a leftover into `<folder>/<original name>` of the open container.
+    func recoverLeftover(_ item: FileEntry, intoFolder folder: String) {
+        guard let c = selectedContainer else {
             logLine("Open the destination container first, then pick where to restore it")
             return
         }
+        let cleaned = folder.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        let rel = cleaned.isEmpty ? item.name : cleaned + "/" + item.name
         Task {
             do {
                 try RustBridge.recoverLeftover(

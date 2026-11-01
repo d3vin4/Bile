@@ -4,6 +4,9 @@ struct SetupView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var pairing: PairingController
     @State private var isPairing = false
+    @State private var recoverTarget: FileEntry? = nil
+    @State private var recoverPath = ""
+    @State private var showRecover = false
 
     var body: some View {
         NavigationView {
@@ -79,9 +82,17 @@ struct SetupView: View {
                         Text("No leftover files").font(.caption).foregroundStyle(.secondary)
                     } else {
                         ForEach(state.leftovers) { item in
-                            VStack(alignment: .leading) {
-                                Text(item.name).font(.caption.monospaced())
-                                Text("\(item.size) bytes").font(.caption2).foregroundStyle(.secondary)
+                            Button {
+                                recoverTarget = item
+                                recoverPath = ""
+                                showRecover = true
+                            } label: {
+                                VStack(alignment: .leading) {
+                                    Text(item.name).font(.caption.monospaced())
+                                    Text("\(item.size) bytes · tap to restore")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -95,6 +106,39 @@ struct SetupView: View {
                 }
             }
             .navigationTitle("Readipa Setup")
+            .sheet(isPresented: $showRecover) {
+                NavigationView {
+                    Form {
+                        Section("Leftover") {
+                            Text(recoverTarget?.name ?? "")
+                                .font(.caption.monospaced())
+                        }
+                        Section("Restore into") {
+                            if let c = state.selectedContainer {
+                                Text(c.name).font(.caption)
+                                TextField("destination folder (e.g. Documents, or empty for the root)", text: $recoverPath)
+                                    .autocapitalization(.none)
+                            } else {
+                                Text("Open a container in the Apps tab first — the leftover is "
+                                     + "restored into the container you are currently browsing.")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                        Section {
+                            Button("Restore") {
+                                if let item = recoverTarget {
+                                    state.recoverLeftover(item, intoFolder: recoverPath)
+                                }
+                                showRecover = false
+                            }
+                            .disabled(state.selectedContainer == nil)
+                            Button("Cancel") { showRecover = false }
+                        }
+                    }
+                    .navigationTitle("Restore leftover")
+                }
+            }
         }
     }
 }
