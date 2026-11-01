@@ -13,6 +13,8 @@ use idevice::afc::AfcClient;
 use idevice::services::house_arrest::HouseArrestClient;
 use serde_json::json;
 use std::ffi::{c_char, c_void};
+use std::io::Write as _;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::exploit::{self, AppDeviceTunnel, Logger};
 use crate::ffi_util::{cstr, opt_str};
@@ -1123,7 +1125,6 @@ async fn fs_list_async(
         )
         .await
         .ok();
-        let _ = orig;
     }
 
     Ok(serde_json::to_string_pretty(&json!({"entries": entries})).map_err(|e| e.to_string())?)

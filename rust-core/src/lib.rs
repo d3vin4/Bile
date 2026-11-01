@@ -233,7 +233,7 @@ pub unsafe extern "C" fn al_fs_write(
         Ok(rc) => rc,
         Err(e) => {
             if !out_error.is_null() {
-                *out_error = cstr(format!("Rust panic in al_fs_write: {e:?}"));
+                *out_error = ffi_util::cstr(format!("Rust panic in al_fs_write: {e:?}"));
             }
             1
         }
@@ -267,7 +267,7 @@ pub unsafe extern "C" fn al_fs_mkdir(
         Ok(rc) => rc,
         Err(e) => {
             if !out_error.is_null() {
-                *out_error = cstr(format!("Rust panic in al_fs_mkdir: {e:?}"));
+                *out_error = ffi_util::cstr(format!("Rust panic in al_fs_mkdir: {e:?}"));
             }
             1
         }
@@ -301,7 +301,7 @@ pub unsafe extern "C" fn al_fs_remove(
         Ok(rc) => rc,
         Err(e) => {
             if !out_error.is_null() {
-                *out_error = cstr(format!("Rust panic in al_fs_remove: {e:?}"));
+                *out_error = ffi_util::cstr(format!("Rust panic in al_fs_remove: {e:?}"));
             }
             1
         }
@@ -337,7 +337,7 @@ pub unsafe extern "C" fn al_fs_rename(
         Ok(rc) => rc,
         Err(e) => {
             if !out_error.is_null() {
-                *out_error = cstr(format!("Rust panic in al_fs_rename: {e:?}"));
+                *out_error = ffi_util::cstr(format!("Rust panic in al_fs_rename: {e:?}"));
             }
             1
         }
