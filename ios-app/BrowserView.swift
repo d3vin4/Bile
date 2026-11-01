@@ -102,7 +102,7 @@ struct BrowserView: View {
         let local = FileManager.default.temporaryDirectory.appendingPathComponent(entry.name)
         Task {
             do {
-                try RustBridge.read(pairingPath: state.pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: state.bridge, destLocalPath: local.path, log: { _ in })
+                try RustBridge.read(pairingPath: state.pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: state.bridge, destLocalPath: local.path)
                 await MainActor.run {
                     state.exportedFileURL = local
                     state.showShareSheet = true

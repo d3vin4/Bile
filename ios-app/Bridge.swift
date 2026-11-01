@@ -1,20 +1,25 @@
 import Foundation
 import AirliftFFI
 
+private let logCallback: ALLogCallback = { _, msg in
+    if let msg = msg {
+        let line = String(cString: msg)
+        DispatchQueue.main.async { AppState.shared.logLine(line) }
+    }
+}
+
 enum RustBridge {
     static func free(_ p: UnsafeMutablePointer<CChar>?) {
         if let p = p { al_string_free(p) }
     }
 
-    static func catalog(pairingPath: String, log: @escaping (String) -> Void) throws -> (apps: [[String: Any]], groups: [[String: Any]]) {
+    static func catalog(pairingPath: String) throws -> (apps: [[String: Any]], groups: [[String: Any]]) {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
-            al_container_catalog(pp, { _, msg in
-                if let msg = msg { log(String(cString: msg)) }
-            }, nil, &outJson, &outErr)
+            al_container_catalog(pp, logCallback, nil, &outJson, &outErr)
         }
-        defer { RustBridge.free(outJson); RustBridge.free(outErr) }
+        defer { free(outJson); free(outErr) }
         if rc != 0 {
             let msg = outErr.map { String(cString: $0) } ?? "catalog failed"
             throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
@@ -29,17 +34,15 @@ enum RustBridge {
         return (apps, groups)
     }
 
-    static func bridgeOpen(pairingPath: String, containerPath: String, log: @escaping (String) -> Void) throws -> (bridge: String, mode: String) {
+    static func bridgeOpen(pairingPath: String, containerPath: String) throws -> (bridge: String, mode: String) {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
             withCString(containerPath) { cp in
-                al_bridge_open(pp, cp, { _, msg in
-                    if let msg = msg { log(String(cString: msg)) }
-                }, nil, &outJson, &outErr)
+                al_bridge_open(pp, cp, logCallback, nil, &outJson, &outErr)
             }
         }
-        defer { RustBridge.free(outJson); RustBridge.free(outErr) }
+        defer { free(outJson); free(outErr) }
         if rc != 0 {
             let msg = outErr.map { String(cString: $0) } ?? "bridge open failed"
             throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
@@ -54,19 +57,17 @@ enum RustBridge {
         return (bridge, mode)
     }
 
-    static func bridgeClose(pairingPath: String, bridge: String, log: @escaping (String) -> Void) {
+    static func bridgeClose(pairingPath: String, bridge: String) {
         var outErr: UnsafeMutablePointer<CChar>?
         withCString(pairingPath) { pp in
             withCString(bridge) { bp in
-                _ = al_bridge_close(pp, bp, { _, msg in
-                    if let msg = msg { log(String(cString: msg)) }
-                }, nil, &outErr)
+                _ = al_bridge_close(pp, bp, logCallback, nil, &outErr)
             }
         }
-        RustBridge.free(outErr)
+        free(outErr)
     }
 
-    static func list(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String, log: @escaping (String) -> Void) throws -> [[String: Any]] {
+    static func list(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String) throws -> [[String: Any]] {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
@@ -74,15 +75,13 @@ enum RustBridge {
                 withCString(containerPath) { cp in
                     withCString(relPath) { rp in
                         withCString(bridge) { bp in
-                            al_fs_list(pp, bi, cp, rp, bp, { _, msg in
-                                if let msg = msg { log(String(cString: msg)) }
-                            }, nil, &outJson, &outErr)
+                            al_fs_list(pp, bi, cp, rp, bp, logCallback, nil, &outJson, &outErr)
                         }
                     }
                 }
             }
         }
-        defer { RustBridge.free(outJson); RustBridge.free(outErr) }
+        defer { free(outJson); free(outErr) }
         if rc != 0 {
             let msg = outErr.map { String(cString: $0) } ?? "list failed"
             throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
@@ -96,7 +95,7 @@ enum RustBridge {
         return entries
     }
 
-    static func stat(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String, log: @escaping (String) -> Void) throws -> [String: Any] {
+    static func stat(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String) throws -> [String: Any] {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
@@ -104,15 +103,13 @@ enum RustBridge {
                 withCString(containerPath) { cp in
                     withCString(relPath) { rp in
                         withCString(bridge) { bp in
-                            al_fs_stat(pp, bi, cp, rp, bp, { _, msg in
-                                if let msg = msg { log(String(cString: msg)) }
-                            }, nil, &outJson, &outErr)
+                            al_fs_stat(pp, bi, cp, rp, bp, logCallback, nil, &outJson, &outErr)
                         }
                     }
                 }
             }
         }
-        defer { RustBridge.free(outJson); RustBridge.free(outErr) }
+        defer { free(outJson); free(outErr) }
         if rc != 0 {
             let msg = outErr.map { String(cString: $0) } ?? "stat failed"
             throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
@@ -125,7 +122,7 @@ enum RustBridge {
         return obj
     }
 
-    static func read(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String, destLocalPath: String, log: @escaping (String) -> Void) throws {
+    static func read(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String, destLocalPath: String) throws {
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
             withCString(bundleId) { bi in
@@ -133,9 +130,7 @@ enum RustBridge {
                     withCString(relPath) { rp in
                         withCString(bridge) { bp in
                             withCString(destLocalPath) { dp in
-                                al_fs_read(pp, bi, cp, rp, bp, dp, { _, msg in
-                                    if let msg = msg { log(String(cString: msg)) }
-                                }, nil, &outErr)
+                                al_fs_read(pp, bi, cp, rp, bp, dp, logCallback, nil, &outErr)
                             }
                         }
                     }
@@ -144,13 +139,13 @@ enum RustBridge {
         }
         if rc != 0 {
             let msg = outErr.map { String(cString: $0) } ?? "read failed"
-            RustBridge.free(outErr)
+            free(outErr)
             throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
         }
-        RustBridge.free(outErr)
+        free(outErr)
     }
 
-    static func write(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String, srcLocalPath: String, log: @escaping (String) -> Void) throws {
+    static func write(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String, srcLocalPath: String) throws {
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
             withCString(bundleId) { bi in
@@ -158,9 +153,7 @@ enum RustBridge {
                     withCString(relPath) { rp in
                         withCString(bridge) { bp in
                             withCString(srcLocalPath) { sp in
-                                al_fs_write(pp, bi, cp, rp, bp, sp, { _, msg in
-                                    if let msg = msg { log(String(cString: msg)) }
-                                }, nil, &outErr)
+                                al_fs_write(pp, bi, cp, rp, bp, sp, logCallback, nil, &outErr)
                             }
                         }
                     }
@@ -169,22 +162,20 @@ enum RustBridge {
         }
         if rc != 0 {
             let msg = outErr.map { String(cString: $0) } ?? "write failed"
-            RustBridge.free(outErr)
+            free(outErr)
             throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
         }
-        RustBridge.free(outErr)
+        free(outErr)
     }
 
-    static func mkdir(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String, log: @escaping (String) -> Void) throws {
+    static func mkdir(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String) throws {
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
             withCString(bundleId) { bi in
                 withCString(containerPath) { cp in
                     withCString(relPath) { rp in
                         withCString(bridge) { bp in
-                            al_fs_mkdir(pp, bi, cp, rp, bp, { _, msg in
-                                if let msg = msg { log(String(cString: msg)) }
-                            }, nil, &outErr)
+                            al_fs_mkdir(pp, bi, cp, rp, bp, logCallback, nil, &outErr)
                         }
                     }
                 }
@@ -192,22 +183,20 @@ enum RustBridge {
         }
         if rc != 0 {
             let msg = outErr.map { String(cString: $0) } ?? "mkdir failed"
-            RustBridge.free(outErr)
+            free(outErr)
             throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
         }
-        RustBridge.free(outErr)
+        free(outErr)
     }
 
-    static func remove(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String, log: @escaping (String) -> Void) throws {
+    static func remove(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String) throws {
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
             withCString(bundleId) { bi in
                 withCString(containerPath) { cp in
                     withCString(relPath) { rp in
                         withCString(bridge) { bp in
-                            al_fs_remove(pp, bi, cp, rp, bp, { _, msg in
-                                if let msg = msg { log(String(cString: msg)) }
-                            }, nil, &outErr)
+                            al_fs_remove(pp, bi, cp, rp, bp, logCallback, nil, &outErr)
                         }
                     }
                 }
@@ -215,13 +204,13 @@ enum RustBridge {
         }
         if rc != 0 {
             let msg = outErr.map { String(cString: $0) } ?? "remove failed"
-            RustBridge.free(outErr)
+            free(outErr)
             throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
         }
-        RustBridge.free(outErr)
+        free(outErr)
     }
 
-    static func rename(pairingPath: String, bundleId: String, containerPath: String, oldRel: String, newRel: String, bridge: String, log: @escaping (String) -> Void) throws {
+    static func rename(pairingPath: String, bundleId: String, containerPath: String, oldRel: String, newRel: String, bridge: String) throws {
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
             withCString(bundleId) { bi in
@@ -229,9 +218,7 @@ enum RustBridge {
                     withCString(oldRel) { or in
                         withCString(newRel) { nr in
                             withCString(bridge) { bp in
-                                al_fs_rename(pp, bi, cp, or, nr, bp, { _, msg in
-                                    if let msg = msg { log(String(cString: msg)) }
-                                }, nil, &outErr)
+                                al_fs_rename(pp, bi, cp, or, nr, bp, logCallback, nil, &outErr)
                             }
                         }
                     }
@@ -240,14 +227,13 @@ enum RustBridge {
         }
         if rc != 0 {
             let msg = outErr.map { String(cString: $0) } ?? "rename failed"
-            RustBridge.free(outErr)
+            free(outErr)
             throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
         }
-        RustBridge.free(outErr)
+        free(outErr)
     }
 }
 
-// Helper
 func withCString<T>(_ s: String, _ body: (UnsafePointer<CChar>) -> T) -> T {
     return s.withCString { body($0) }
 }

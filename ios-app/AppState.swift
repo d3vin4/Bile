@@ -49,7 +49,7 @@ final class AppState: ObservableObject {
         catalogError = nil
         Task {
             do {
-                let (a, g) = try RustBridge.catalog(pairingPath: pairingPath, log: { [weak self] in self?.logLine($0) })
+                let (a, g) = try RustBridge.catalog(pairingPath: pairingPath)
                 var apps: [AppEntry] = []
                 for d in a {
                     apps.append(AppEntry(
@@ -92,7 +92,7 @@ final class AppState: ObservableObject {
         entries = []
         Task {
             do {
-                let (b, m) = try RustBridge.bridgeOpen(pairingPath: pairingPath, containerPath: path, log: { [weak self] in self?.logLine($0) })
+                let (b, m) = try RustBridge.bridgeOpen(pairingPath: pairingPath, containerPath: path)
                 await MainActor.run {
                     self.bridge = b
                     self.bridgeMode = m
@@ -106,7 +106,7 @@ final class AppState: ObservableObject {
 
     func closeContainer() {
         if !bridge.isEmpty {
-            RustBridge.bridgeClose(pairingPath: pairingPath, bridge: bridge, log: { [weak self] in self?.logLine($0) })
+            RustBridge.bridgeClose(pairingPath: pairingPath, bridge: bridge)
         }
         selectedContainer = nil
         bridge = ""
@@ -121,7 +121,7 @@ final class AppState: ObservableObject {
         filesError = nil
         Task {
             do {
-                let list = try RustBridge.list(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: currentRelPath, bridge: bridge, log: { [weak self] in self?.logLine($0) })
+                let list = try RustBridge.list(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: currentRelPath, bridge: bridge)
                 var out: [FileEntry] = []
                 for d in list {
                     out.append(FileEntry(
@@ -173,7 +173,7 @@ final class AppState: ObservableObject {
         let local = FileManager.default.temporaryDirectory.appendingPathComponent(entry.name).path
         Task {
             do {
-                try RustBridge.read(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, destLocalPath: local, log: { [weak self] in self?.logLine($0) })
+                try RustBridge.read(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, destLocalPath: local)
                 // copy to dest
                 let src = URL(fileURLWithPath: local)
                 try? FileManager.default.removeItem(at: destURL)
@@ -190,7 +190,7 @@ final class AppState: ObservableObject {
         let rel = currentRelPath.isEmpty ? entry.name : currentRelPath + "/" + entry.name
         Task {
             do {
-                try RustBridge.remove(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, log: { [weak self] in self?.logLine($0) })
+                try RustBridge.remove(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge)
                 await MainActor.run { loadFiles() }
             } catch {
                 await MainActor.run { logLine("Delete failed: \(error.localizedDescription)") }
@@ -203,7 +203,7 @@ final class AppState: ObservableObject {
         let rel = currentRelPath.isEmpty ? name : currentRelPath + "/" + name
         Task {
             do {
-                try RustBridge.mkdir(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, log: { [weak self] in self?.logLine($0) })
+                try RustBridge.mkdir(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge)
                 await MainActor.run { loadFiles() }
             } catch {
                 await MainActor.run { logLine("Mkdir failed: \(error.localizedDescription)") }
@@ -217,7 +217,7 @@ final class AppState: ObservableObject {
         let newRel = currentRelPath.isEmpty ? newName : currentRelPath + "/" + newName
         Task {
             do {
-                try RustBridge.rename(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, oldRel: oldRel, newRel: newRel, bridge: bridge, log: { [weak self] in self?.logLine($0) })
+                try RustBridge.rename(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, oldRel: oldRel, newRel: newRel, bridge: bridge)
                 await MainActor.run { loadFiles() }
             } catch {
                 await MainActor.run { logLine("Rename failed: \(error.localizedDescription)") }
@@ -236,7 +236,7 @@ final class AppState: ObservableObject {
             do {
                 let data = try Data(contentsOf: url)
                 try data.write(to: URL(fileURLWithPath: local))
-                try RustBridge.write(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, srcLocalPath: local, log: { [weak self] in self?.logLine($0) })
+                try RustBridge.write(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, srcLocalPath: local)
                 await MainActor.run { loadFiles() }
             } catch {
                 await MainActor.run { logLine("Import failed: \(error.localizedDescription)") }
