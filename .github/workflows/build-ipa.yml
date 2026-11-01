@@ -20,8 +20,7 @@ jobs:
       - name: Build Rust core
         run: |
           chmod +x build-ios.sh build-ipa.sh
-          echo "HOME=$HOME"; echo "PATH=$PATH"; which cargo rustc rustup || true; ls -la "$HOME/.cargo/bin" 2>/dev/null || true; cat "$HOME/.cargo/env" 2>/dev/null || true
-          bash -x ./build-ios.sh
+          ./build-ios.sh
 
       - name: Install XcodeGen
         run: brew install xcodegen

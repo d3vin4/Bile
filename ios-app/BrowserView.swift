@@ -9,8 +9,6 @@ struct BrowserView: View {
     @State private var renameTarget: FileEntry? = nil
     @State private var renameName = ""
     @State private var showRename = false
-    @State private var exportTarget: FileEntry? = nil
-    @State private var showExporter = false
 
     var body: some View {
         NavigationView {
@@ -50,7 +48,7 @@ struct BrowserView: View {
                                 Button(role: .destructive) { state.deleteEntry(entry) } label: { Label("Delete", systemImage: "trash") }
                                 Button { renameTarget = entry; renameName = entry.name; showRename = true } label: { Label("Rename", systemImage: "pencil") }
                                 if !entry.isDir {
-                                    Button { exportTarget = entry; showExporter = true } label: { Label("Export", systemImage: "square.and.arrow.up") }
+                                    Button { exportEntry(entry) } label: { Label("Export", systemImage: "square.and.arrow.up") }
                                 }
                             }
                         }
@@ -90,30 +88,28 @@ struct BrowserView: View {
             .fileImporter(isPresented: $showImporter, allowedContentTypes: [.data]) { result in
                 if case .success(let url) = result { state.importFile(from: url) }
             }
-            .fileExporter(isPresented: $showExporter, document: exportTarget.map { FileDocumentWrapper(entry: $0, state: state) }, contentType: .data, defaultFilename: exportTarget?.name ?? "file") { result in
-                if case .success(let url) = result, let e = exportTarget {
-                    state.exportFile(e, to: url)
+            .sheet(isPresented: $state.showShareSheet) {
+                if let url = state.exportedFileURL {
+                    ShareSheet(items: [url])
                 }
-                exportTarget = nil
             }
         }
     }
-}
 
-// Minimal FileDocument wrapper for export
-struct FileDocumentWrapper: FileDocument {
-    var entry: FileEntry
-    var state: AppState
-    static var readableContentTypes: [UTType] { [.data] }
-    init(entry: FileEntry, state: AppState) { self.entry = entry; self.state = state }
-    init(configuration: ReadConfiguration) throws { fatalError() }
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        // read from container into temp then wrap
-        let local = FileManager.default.temporaryDirectory.appendingPathComponent(entry.name).path
+    @MainActor func exportEntry(_ entry: FileEntry) {
+        guard let c = state.selectedContainer else { return }
         let rel = state.currentRelPath.isEmpty ? entry.name : state.currentRelPath + "/" + entry.name
-        guard let c = state.selectedContainer else { throw CocoaError(.fileNoSuchFile) }
-        try RustBridge.read(pairingPath: state.pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: state.bridge, destLocalPath: local, log: { _ in })
-        let data = try Data(contentsOf: URL(fileURLWithPath: local))
-        return FileWrapper(regularFileWithContents: data)
+        let local = FileManager.default.temporaryDirectory.appendingPathComponent(entry.name)
+        Task {
+            do {
+                try RustBridge.read(pairingPath: state.pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: state.bridge, destLocalPath: local.path, log: { _ in })
+                await MainActor.run {
+                    state.exportedFileURL = local
+                    state.showShareSheet = true
+                }
+            } catch {
+                await MainActor.run { state.logLine("Export failed: \(error.localizedDescription)") }
+            }
+        }
     }
 }

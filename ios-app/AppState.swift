@@ -26,6 +26,8 @@ final class AppState: ObservableObject {
     @Published var filesError: String? = nil
 
     @Published var log: [String] = []
+    @Published var exportedFileURL: URL? = nil
+    @Published var showShareSheet: Bool = false
 
     enum PairingPhase: Equatable { case idle, pairing }
 

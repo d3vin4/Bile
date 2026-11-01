@@ -1,4 +1,5 @@
 import SwiftUI
+import AirliftFFI
 
 @main
 struct ReadipaApp: App {
@@ -6,7 +7,7 @@ struct ReadipaApp: App {
     @StateObject private var pairing = PairingController.shared
 
     init() {
-        _ = al_log_init({ _, msg in
+        _ = al_log_init({ (_: UnsafeMutableRawPointer?, msg: UnsafePointer<CChar>?) in
             if let msg = msg {
                 let line = String(cString: msg)
                 DispatchQueue.main.async { AppState.shared.logLine(line) }

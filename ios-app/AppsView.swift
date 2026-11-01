@@ -7,8 +7,14 @@ struct AppsView: View {
 
     var filteredApps: [AppEntry] {
         let q = search.lowercased()
-        guard !q.isEmpty else { return state.apps }
-        return state.apps.filter { $0.name.lowercased().contains(q) || $0.bundleId.lowercased().contains(q) }
+        if q.isEmpty { return state.apps }
+        var result: [AppEntry] = []
+        for app in state.apps {
+            if app.name.lowercased().contains(q) || app.bundleId.lowercased().contains(q) {
+                result.append(app)
+            }
+        }
+        return result
     }
 
     var body: some View {
