@@ -22,16 +22,8 @@ struct AppsView: View {
             List {
                 Section("Applications (\(state.apps.count))") {
                     ForEach(filteredApps) { app in
-                        NavigationLink {
-                            ContainerDetailView(app: app, isGroup: false)
-                        } label: {
-                            VStack(alignment: .leading) {
-                                Text(app.name).font(.headline)
-                                Text(app.bundleId).font(.caption).foregroundStyle(.secondary)
-                                if !app.dataContainer.isEmpty {
-                                    Text(app.dataContainer).font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }
+                        NavigationLink(destination: ContainerDetailView(app: app, isGroup: false)) {
+                            AppRow(app: app)
                         }
                     }
                 }
@@ -55,6 +47,19 @@ struct AppsView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { state.loadCatalog() } label: { Image(systemName: "arrow.clockwise") }
                 }
+            }
+        }
+    }
+}
+
+struct AppRow: View {
+    let app: AppEntry
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(app.name).font(.headline)
+            Text(app.bundleId).font(.caption).foregroundStyle(.secondary)
+            if !app.dataContainer.isEmpty {
+                Text(app.dataContainer).font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
