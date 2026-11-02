@@ -3062,6 +3062,42 @@ async fn diagnose_async(
         json!({"ok": read_ok, "detail": read_err}),
     );
 
+    // 4b. Other AFC-rooted services: do any of them expose a wider root?
+    let mut services = serde_json::Map::new();
+    for service in [
+        "com.apple.afc",
+        "com.apple.crashreportcopymobile",
+        "com.apple.mobile.house_arrest",
+    ] {
+        match tunnel.connect_service(service, logger).await {
+            Ok(stream) => {
+                let mut candidate = AfcClient::new(idevice::Idevice::new(stream, "probe"));
+                let dot = candidate.list_dir(".").await;
+                let dotdot = candidate.list_dir("..").await;
+                let escape = candidate
+                    .get_file_info("../../Containers/Data/Application")
+                    .await;
+                services.insert(
+                    service.to_string(),
+                    json!({
+                        "connected": true,
+                        "rootEntries": dot.as_ref().map(|v| v.len()).unwrap_or(0),
+                        "rootListError": dot.err().map(|e| format!("{e:?}")),
+                        "parentListError": dotdot.err().map(|e| format!("{e:?}")),
+                        "escapeStat": match escape {
+                            Ok(i) => format!("{}", i.st_ifmt),
+                            Err(e) => format!("{e:?}"),
+                        },
+                    }),
+                );
+            }
+            Err(e) => {
+                services.insert(service.to_string(), json!({"connected": false, "error": e}));
+            }
+        }
+    }
+    report.insert("afcServices".into(), serde_json::Value::Object(services));
+
     // 5. Optional: try a single tiny relocation to see whether moves work.
     if risky_moves_allowed() {
         let token = exploit::random_hex(6);

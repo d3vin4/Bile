@@ -115,6 +115,19 @@ async fn catalog_async(pairing_path: String, logger: &Logger) -> Result<String, 
             .unwrap_or("")
             .to_string();
 
+        // `get-task-allow` is what HouseArrest (and JIT) need; file sharing
+        // exposes Documents through house_arrest and Finder/Files.
+        let get_task_allow = dict
+            .get("Entitlements")
+            .and_then(|v| v.as_dictionary())
+            .and_then(|e| e.get("get-task-allow"))
+            .and_then(|v| v.as_boolean())
+            .unwrap_or(false);
+        let file_sharing = dict
+            .get("UIFileSharingEnabled")
+            .and_then(|v| v.as_boolean())
+            .unwrap_or(false);
+
         let data_container = dict
             .get("Container")
             .and_then(|v| v.as_string())
@@ -146,6 +159,8 @@ async fn catalog_async(pairing_path: String, logger: &Logger) -> Result<String, 
             "version": version,
             "dataContainer": data_container,
             "groupContainers": group_map,
+            "getTaskAllow": get_task_allow,
+            "fileSharing": file_sharing,
         }));
     }
 

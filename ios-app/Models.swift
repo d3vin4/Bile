@@ -8,6 +8,15 @@ struct AppEntry: Identifiable, Hashable {
     let version: String
     let dataContainer: String
     let groupContainers: [String: String]
+    let getTaskAllow: Bool
+    let fileSharing: Bool
+
+    /// What iOS will actually let Readipa do with this app's container.
+    var access: String {
+        if getTaskAllow { return "full" }
+        if fileSharing { return "documents" }
+        return "none"
+    }
 }
 
 struct GroupEntry: Identifiable, Hashable {

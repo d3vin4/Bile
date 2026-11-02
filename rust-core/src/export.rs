@@ -204,6 +204,7 @@ pub unsafe fn export_container(
     bridge: *const c_char,
     dest_zip_path: *const c_char,
     root_name: *const c_char,
+    subtrees: *const c_char,
     log_cb: exploit::ALLogCallback,
     ctx: *mut c_void,
     out_json: *mut *mut c_char,
@@ -216,6 +217,7 @@ pub unsafe fn export_container(
     let bridge = opt_str(bridge, "");
     let dest_zip_path = opt_str(dest_zip_path, "");
     let root_name = opt_str(root_name, "");
+    let subtrees = opt_str(subtrees, "");
     let ctx_usize = ctx as usize;
 
     if !fsengine::allowed_container(&container_path) || !fsengine::safe_rel(&rel_path) {
@@ -244,6 +246,7 @@ pub unsafe fn export_container(
             bridge.clone(),
             dest_zip_path.clone(),
             root_name.clone(),
+            subtrees.clone(),
             &logger,
         ))
     });
@@ -279,6 +282,7 @@ async fn export_async(
     bridge: String,
     dest_zip_path: String,
     root_name: String,
+    subtrees: String,
     logger: &Logger,
 ) -> Result<String, String> {
     if let Some(parent) = std::path::Path::new(&dest_zip_path).parent() {
@@ -295,9 +299,49 @@ async fn export_async(
     let mut mode = "direct";
     let mut relocate: Option<(String, String)> = None;
 
+    // Which parts of the container to export. Empty = everything.
+    let want: Vec<String> = subtrees
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let mut subtree_report: Vec<serde_json::Value> = Vec::new();
+
     if engine.direct_read {
         let root_afc = engine.path(&rel_path);
-        archive_tree(&mut engine.afc, &root_afc, &prefix, &mut exporter, logger).await;
+        if want.is_empty() {
+            archive_tree(&mut engine.afc, &root_afc, &prefix, &mut exporter, logger).await;
+            subtree_report.push(json!({"path": ".", "ok": true, "note": "whole container"}));
+        } else {
+            for sub in &want {
+                if !fsengine::safe_rel(sub) {
+                    subtree_report.push(json!({"path": sub, "ok": false, "error": "unsafe path"}));
+                    continue;
+                }
+                let before = exporter.files;
+                let probe = engine.path(&format!(
+                    "{}{}{}",
+                    rel_path,
+                    if rel_path.is_empty() { "" } else { "/" },
+                    sub
+                ));
+                if engine.afc.get_file_info(&probe).await.is_err() {
+                    subtree_report.push(json!({"path": sub, "ok": false, "error": "not present"}));
+                    continue;
+                }
+                let zip_prefix = if prefix.is_empty() {
+                    sub.clone()
+                } else {
+                    format!("{prefix}/{sub}")
+                };
+                archive_tree(&mut engine.afc, &probe, &zip_prefix, &mut exporter, logger).await;
+                subtree_report.push(json!({
+                    "path": sub,
+                    "ok": true,
+                    "files": exporter.files - before,
+                }));
+            }
+        }
     } else {
         if !fsengine::risky_moves_allowed() {
             return Err(
@@ -316,7 +360,30 @@ async fn export_async(
             .await
             .map_err(|e| format!("could not relocate the folder for export: {e}"))?;
 
-        archive_tree(&mut engine.afc, &staging, &prefix, &mut exporter, logger).await;
+        if want.is_empty() {
+            archive_tree(&mut engine.afc, &staging, &prefix, &mut exporter, logger).await;
+            subtree_report.push(json!({"path": ".", "ok": true, "note": "whole container"}));
+        } else {
+            for sub in &want {
+                let before = exporter.files;
+                let probe = format!("{staging}/{sub}");
+                if engine.afc.get_file_info(&probe).await.is_err() {
+                    subtree_report.push(json!({"path": sub, "ok": false, "error": "not present"}));
+                    continue;
+                }
+                let zip_prefix = if prefix.is_empty() {
+                    sub.clone()
+                } else {
+                    format!("{prefix}/{sub}")
+                };
+                archive_tree(&mut engine.afc, &probe, &zip_prefix, &mut exporter, logger).await;
+                subtree_report.push(json!({
+                    "path": sub,
+                    "ok": true,
+                    "files": exporter.files - before,
+                }));
+            }
+        }
 
         relocate = Some((staging, dst_back));
     }
@@ -333,6 +400,7 @@ async fn export_async(
         "symlinks": exporter.links,
         "bytes": exporter.bytes,
         "failures": exporter.failures,
+        "subtrees": subtree_report,
         "generator": "Readipa",
     });
     let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
@@ -372,6 +440,7 @@ async fn export_async(
         "bytes": bytes,
         "mode": mode,
         "failures": failures,
+        "subtrees": subtree_report,
     }))
     .map_err(|e| e.to_string())?)
 }

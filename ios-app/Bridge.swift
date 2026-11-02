@@ -79,6 +79,27 @@ enum RustBridge {
         free(outErr)
     }
 
+    static func enableJIT(pairingPath: String, bundleId: String) throws -> [String: Any] {
+        var outJson: UnsafeMutablePointer<CChar>?
+        var outErr: UnsafeMutablePointer<CChar>?
+        let rc = withCString(pairingPath) { pp in
+            withCString(bundleId) { bp in
+                al_jit_enable(pp, bp, logCallback, nil, &outJson, &outErr)
+            }
+        }
+        defer { free(outJson); free(outErr) }
+        if rc != 0 {
+            let msg = outErr.map { String(cString: $0) } ?? "JIT enable failed"
+            throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        guard let json = outJson.map({ String(cString: $0) }),
+              let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return obj
+    }
+
     static func appIcon(pairingPath: String, bundleId: String, destLocalPath: String) throws {
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
@@ -184,7 +205,8 @@ enum RustBridge {
         relPath: String,
         bridge: String,
         destZipPath: String,
-        rootName: String
+        rootName: String,
+        subtrees: String = ""
     ) throws -> [String: Any] {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?
@@ -195,7 +217,9 @@ enum RustBridge {
                         withCString(bridge) { bp in
                             withCString(destZipPath) { zp in
                                 withCString(rootName) { rn in
-                                    al_export_container(pp, bi, cp, rp, bp, zp, rn, logCallback, nil, &outJson, &outErr)
+                                    withCString(subtrees) { st in
+                                        al_export_container(pp, bi, cp, rp, bp, zp, rn, st, logCallback, nil, &outJson, &outErr)
+                                    }
                                 }
                             }
                         }

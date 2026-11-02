@@ -41,12 +41,14 @@ struct AppsView: View {
                     emptyState
                 } else if mode == 0 {
                     appList
-                } else {
+                } else if mode == 1 {
                     groupList
+                } else {
+                    jitList
                 }
             }
             .searchable(text: $search, prompt: mode == 0 ? lang("search.apps") : lang("search.groups"))
-            .navigationTitle(mode == 0 ? lang("apps") : lang("app.groups"))
+            .navigationTitle(mode == 0 ? lang("apps") : (mode == 1 ? lang("app.groups") : "JIT"))
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { state.loadCatalog() } label: {
@@ -86,6 +88,49 @@ struct AppsView: View {
         }
         .listStyle(.plain)
         .refreshable { state.loadCatalog() }
+    }
+
+    // MARK: - JIT
+
+    private var jitList: some View {
+        List {
+            Section {
+                ForEach(state.jitCapableApps) { app in
+                    HStack(spacing: 10) {
+                        AppIconView(bundleId: app.bundleId, name: app.name, size: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(app.name).lineLimit(1)
+                            Text(app.bundleId)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        if state.jitDone.contains(app.bundleId) {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                        } else if state.jitBusy == app.bundleId {
+                            ProgressView()
+                        } else {
+                            Button("Enable") { state.enableJIT(app) }
+                                .readipaGlassButton()
+                        }
+                    }
+                }
+            } footer: {
+                Text("JIT can only be enabled for sideloaded apps that carry the get-task-allow "
+                     + "entitlement — the same rule every on-device debugger follows. The app is "
+                     + "relaunched suspended, the debugger attaches, then detaches so it keeps "
+                     + "running with JIT. Nothing is installed or modified.")
+                    .font(.caption2)
+            }
+            if state.jitCapableApps.isEmpty {
+                Text(state.hasPairingFile ? "No sideloaded (get-task-allow) app found — load the catalog first."
+                                          : "Pair the device first.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.insetGrouped)
     }
 
     // MARK: - App Groups
@@ -147,20 +192,26 @@ struct AppRow: View {
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                HStack(spacing: 6) {
-                    if !app.dataContainer.isEmpty {
-                        Label("container", systemImage: "folder")
+                HStack(spacing: 8) {
+                    switch app.access {
+                    case "full":
+                        Label("full access", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                    case "documents":
+                        Label("documents", systemImage: "doc")
+                            .foregroundStyle(.orange)
+                    default:
+                        Label("no access", systemImage: "lock.fill")
+                            .foregroundStyle(.secondary)
                     }
                     if !app.groupContainers.isEmpty {
-                        Label("\(app.groupContainers.count) group\(app.groupContainers.count == 1 ? "" : "s")",
-                              systemImage: "square.stack.3d.up")
+                        Label("\(app.groupContainers.count)", systemImage: "square.stack.3d.up")
                     }
                     if !app.version.isEmpty {
                         Text("v\(app.version)")
                     }
                 }
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 2)

@@ -168,6 +168,14 @@ void al_clear_target_hosts(void);
 // Container catalog & file system (Application Containers + App Groups)
 // ---------------------------------------------------------------------------
 
+// Enable JIT for a sideloaded app (requires get-task-allow).
+int32_t al_jit_enable(const char *pairing_path,
+                      const char *bundle_id,
+                      ALLogCallback log_cb,
+                      void *ctx,
+                      char **out_json,
+                      char **out_error);
+
 // Read-only diagnostic report for one container (HouseArrest, bridge, probes).
 int32_t al_diagnose_container(const char *pairing_path,
                               const char *bundle_id,
@@ -299,6 +307,7 @@ int32_t al_export_container(const char *pairing_path,
                             const char *bridge,
                             const char *dest_zip_path,
                             const char *root_name,
+                            const char *subtrees,
                             ALLogCallback log_cb,
                             void *ctx,
                             char **out_json,

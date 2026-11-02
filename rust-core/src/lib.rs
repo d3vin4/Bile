@@ -16,6 +16,7 @@ pub mod ffi_util;
 pub mod fsengine;
 pub mod grappa;
 pub mod icons;
+pub mod jit;
 pub mod logging;
 pub mod pairing;
 
@@ -311,6 +312,29 @@ pub unsafe extern "C" fn al_fs_remove(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn al_jit_enable(
+    pairing_path: *const c_char,
+    bundle_id: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        jit::jit_enable(pairing_path, bundle_id, log_cb, ctx, out_json, out_error)
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(e) => {
+            if !out_error.is_null() {
+                *out_error = ffi_util::cstr(format!("Rust panic in al_jit_enable: {e:?}"));
+            }
+            1
+        }
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn al_diagnose_container(
     pairing_path: *const c_char,
     bundle_id: *const c_char,
@@ -450,6 +474,7 @@ pub unsafe extern "C" fn al_export_container(
     bridge: *const c_char,
     dest_zip_path: *const c_char,
     root_name: *const c_char,
+    subtrees: *const c_char,
     log_cb: exploit::ALLogCallback,
     ctx: *mut c_void,
     out_json: *mut *mut c_char,
@@ -464,6 +489,7 @@ pub unsafe extern "C" fn al_export_container(
             bridge,
             dest_zip_path,
             root_name,
+            subtrees,
             log_cb,
             ctx,
             out_json,

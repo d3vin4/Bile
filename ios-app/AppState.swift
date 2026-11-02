@@ -103,6 +103,36 @@ final class AppState: ObservableObject {
 
     // MARK: - Pairing
 
+    @Published var jitBusy: String? = nil
+    @Published var jitDone: Set<String> = []
+
+    /// Apps that can accept a debugger attach, i.e. sideloaded with
+    /// `get-task-allow`. Those are the only ones JIT can be enabled for.
+    var jitCapableApps: [AppEntry] {
+        apps.filter(\.getTaskAllow).sorted { $0.name < $1.name }
+    }
+
+    func enableJIT(_ app: AppEntry) {
+        jitBusy = app.bundleId
+        logLine("Enabling JIT for \(app.name)…")
+        Task {
+            do {
+                let json = try RustBridge.enableJIT(pairingPath: pairingPath, bundleId: app.bundleId)
+                let pid = (json["pid"] as? Int) ?? 0
+                await MainActor.run {
+                    jitBusy = nil
+                    jitDone.insert(app.bundleId)
+                    logLine("JIT enabled for \(app.name) (pid \(pid)) ✅")
+                }
+            } catch {
+                await MainActor.run {
+                    jitBusy = nil
+                    logLine("JIT failed for \(app.name): \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     func refreshPairingFile() {
         // Touch the store so a Keychain-only pairing is restored to disk.
         let path = PairingController.pairingFilePath()
@@ -149,7 +179,9 @@ final class AppState: ObservableObject {
                         type: (d["type"] as? String) ?? "",
                         version: (d["version"] as? String) ?? "",
                         dataContainer: (d["dataContainer"] as? String) ?? "",
-                        groupContainers: (d["groupContainers"] as? [String: String]) ?? [:]
+                        groupContainers: (d["groupContainers"] as? [String: String]) ?? [:],
+                        getTaskAllow: (d["getTaskAllow"] as? Bool) ?? false,
+                        fileSharing: (d["fileSharing"] as? Bool) ?? false
                     ))
                 }
                 var groups: [GroupEntry] = []
@@ -350,6 +382,14 @@ final class AppState: ObservableObject {
         exportContainerAsZip(relPathOverride: relPath(for: entry), nameOverride: entry.name)
     }
 
+    /// What to include by default: the two folders that actually hold an app's
+    /// data. `tmp`/`Caches` can be huge and are usually worthless.
+    static let defaultExportSubtrees = "Library,Documents"
+
+    @Published var exportEverything = UserDefaults.standard.bool(forKey: "readipa.exportEverything") {
+        didSet { UserDefaults.standard.set(exportEverything, forKey: "readipa.exportEverything") }
+    }
+
     func exportContainerAsZip(relPathOverride: String? = nil, nameOverride: String? = nil) {
         guard let c = selectedContainer else { return }
         isExporting = true
@@ -370,7 +410,8 @@ final class AppState: ObservableObject {
                     relPath: rel,
                     bridge: bridge,
                     destZipPath: zip.path,
-                    rootName: baseName
+                    rootName: baseName,
+                    subtrees: rel.isEmpty && !exportEverything ? Self.defaultExportSubtrees : ""
                 )
                 await MainActor.run {
                     isExporting = false
@@ -381,6 +422,18 @@ final class AppState: ObservableObject {
                     let bytes = (json["bytes"] as? Int) ?? 0
                     let failures = (json["failures"] as? [String]) ?? []
                     logLine("Export done: \(files) files, \(FileEntry.prettySize(bytes)) ✅")
+                    if let subtrees = json["subtrees"] as? [[String: Any]] {
+                        for entry in subtrees {
+                            let path = (entry["path"] as? String) ?? "?"
+                            if (entry["ok"] as? Bool) == true {
+                                let count = (entry["files"] as? Int) ?? 0
+                                logLine("  • \(path): \(count) files")
+                            } else {
+                                let err = (entry["error"] as? String) ?? "unavailable"
+                                logLine("  • \(path): skipped (\(err))")
+                            }
+                        }
+                    }
                     if !failures.isEmpty {
                         logLine("Export warnings (\(failures.count)):")
                         for f in failures.prefix(20) { logLine("  • \(f)") }
