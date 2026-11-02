@@ -73,7 +73,7 @@ struct SetupView: View {
                 Text("Status")
                 Spacer()
                 Text(state.hasPairingFile ? "Paired" : "Not paired")
-                    .foregroundStyle(state.hasPairingFile ? .green : .red)
+                    .foregroundStyle(state.hasPairingFile ? Color.green : Color.red)
                     .bold()
             }
             if state.hasPairingFile {
@@ -161,7 +161,7 @@ struct SetupView: View {
                     Spacer()
                     Text(result.summary)
                         .font(.caption2)
-                        .foregroundStyle(result.ok ? .green : .secondary)
+                        .foregroundStyle(result.ok ? Color.green : Color.secondary)
                 }
             }
         } header: {
@@ -250,7 +250,7 @@ struct SetupView: View {
                     ForEach(group.items) { item in
                         HStack(spacing: 8) {
                             Image(systemName: item.isLink ? "link" : (item.isDir ? "folder" : "doc"))
-                                .foregroundStyle(item.safeToRemove ? .secondary : .orange)
+                                .foregroundStyle(item.safeToRemove ? Color.secondary : Color.orange)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.name)
                                     .font(.caption.monospaced())

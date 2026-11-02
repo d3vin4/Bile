@@ -151,7 +151,7 @@ struct BrowserView: View {
     private func row(_ entry: FileEntry) -> some View {
         HStack(spacing: 10) {
             Image(systemName: entry.iconName)
-                .foregroundStyle(entry.isDir ? Color.accentColor : (entry.isLink ? .orange : .secondary))
+                .foregroundStyle(entry.isDir ? Color.accentColor : (entry.isLink ? Color.orange : Color.secondary))
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name).lineLimit(1)

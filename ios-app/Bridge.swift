@@ -53,9 +53,9 @@ enum RustBridge {
               let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let entries = obj["entries"] as? [[String: Any]] else {
-            return []
+            return ([], bridge)
         }
-        return entries
+        return (entries, (obj["bridge"] as? String) ?? bridge)
     }
 
     static func recoverLeftover(pairingPath: String, leftoverName: String, containerPath: String, relPath: String, bridge: String) throws {
@@ -186,7 +186,10 @@ enum RustBridge {
         free(outErr)
     }
 
-    static func list(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String) throws -> [[String: Any]] {
+    /// Returns the entries plus the bridge the core actually used. The core
+    /// recreates a missing bridge on its own, so the caller must adopt the name
+    /// it reports back.
+    static func list(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String) throws -> (entries: [[String: Any]], bridge: String) {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
@@ -209,9 +212,9 @@ enum RustBridge {
               let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let entries = obj["entries"] as? [[String: Any]] else {
-            return []
+            return ([], bridge)
         }
-        return entries
+        return (entries, (obj["bridge"] as? String) ?? bridge)
     }
 
     static func stat(pairingPath: String, bundleId: String, containerPath: String, relPath: String, bridge: String) throws -> [String: Any] {

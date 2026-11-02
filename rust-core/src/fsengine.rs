@@ -723,17 +723,53 @@ async fn media_list_root(afc: &mut AfcClient) -> Result<Vec<String>, String> {
     Err("could not list the Media root".to_string())
 }
 
-/// Remove leftover bridge symlinks from previous runs. Symlinks hold no data,
-/// so this is always safe.
-async fn cleanup_stale_bridges(afc: &mut AfcClient) {
-    if let Ok(names) = media_list_root(afc).await {
-        for n in names {
-            if n.starts_with("readipa-bridge-") {
-                // Single remove only — never recurse through the symlink.
-                let _ = afc.remove(&n).await;
-            }
+/// Finds an existing bridge that already points at `container_path`.
+///
+/// Reusing it keeps Media tidy without ever touching a bridge another container
+/// may still be using. Bridges are only removed by `al_bridge_close` or by the
+/// explicit "Clean empty" action in Recovery.
+async fn find_usable_bridge(afc: &mut AfcClient, container_path: &str) -> Option<String> {
+    let names = media_list_root(afc).await.ok()?;
+    for name in names {
+        if !name.starts_with("readipa-bridge-") {
+            continue;
+        }
+        if bridge_is_ours(afc, &name, container_path).await {
+            return Some(name);
         }
     }
+    None
+}
+
+/// Create a fresh bridge to `container_path`.
+async fn make_bridge(
+    tunnel: &mut AppDeviceTunnel,
+    afc: &mut AfcClient,
+    container_path: &str,
+    logger: &Logger,
+) -> Result<String, String> {
+    let candidate = format!("readipa-bridge-{}", exploit::random_hex(6));
+    let made = afc
+        .link(container_path, &candidate, LinkType::Symlink)
+        .await
+        .is_ok();
+    let bridge = if made {
+        candidate
+    } else {
+        create_bridge_atc(tunnel, afc, container_path, logger).await?
+    };
+    if !wait_present(afc, &bridge, 20).await {
+        return Err("could not create a bridge in Media".to_string());
+    }
+    match bridge_matches(afc, &bridge, container_path).await {
+        Ok(Some(true)) | Ok(None) => {}
+        Ok(Some(false)) => {
+            let _ = remove_one(afc, &bridge).await;
+            return Err("bridge target mismatch; the symlink was removed".to_string());
+        }
+        Err(e) => return Err(format!("could not verify the new bridge: {e}")),
+    }
+    Ok(bridge)
 }
 
 async fn create_bridge_atc(
@@ -742,8 +778,6 @@ async fn create_bridge_atc(
     container_path: &str,
     logger: &Logger,
 ) -> Result<String, String> {
-    cleanup_stale_bridges(afc).await;
-
     let token = exploit::random_hex(10);
     let source = format!("airlift-src-{token}");
     let bridge_name = format!("readipa-bridge-{token}");
@@ -795,20 +829,30 @@ async fn create_bridge_atc(
     if !wait_present(afc, &bridge_name, 20).await {
         return Err("Bridge was not created in Media".into());
     }
-    // The symlink must point at the container we asked for.
-    if !bridge_matches(afc, &bridge_name, container_path).await? {
-        let _ = remove_one(afc, &bridge_name).await;
-        return Err("Bridge target mismatch; the symlink was removed".into());
+    // The symlink must point at the container we asked for (when the target is
+    // reported at all).
+    match bridge_matches(afc, &bridge_name, container_path).await {
+        Ok(Some(true)) | Ok(None) => Ok(bridge_name),
+        Ok(Some(false)) => {
+            let _ = remove_one(afc, &bridge_name).await;
+            Err("Bridge target mismatch; the symlink was removed".into())
+        }
+        Err(e) => Err(format!("could not verify the new bridge: {e}")),
     }
-    Ok(bridge_name)
 }
 
-/// Verify that a caller-supplied bridge really points at `container_path`.
+/// Compare a bridge symlink with the container it is supposed to serve.
+///
+/// `Ok(Some(true))`  — the target is known and matches.
+/// `Ok(Some(false))` — the target is known and points somewhere else.
+/// `Ok(None)`        — this iOS build does not report the link target, so a
+///                     match can neither be proven nor disproven. Callers that
+///                     only *reuse* bridges must treat this as "no".
 async fn bridge_matches(
     afc: &mut AfcClient,
     bridge: &str,
     container_path: &str,
-) -> Result<bool, String> {
+) -> Result<Option<bool>, String> {
     let info = afc
         .get_file_info(bridge)
         .await
@@ -819,16 +863,27 @@ async fn bridge_matches(
     match info.st_link_target {
         Some(target) => {
             let resolved = resolve_link_target("/var/mobile/Media", &target);
-            let want = normalize_path(container_path);
-            if resolved == want {
-                Ok(true)
-            } else {
-                Err(format!("bridge points at {resolved}, not {want}"))
-            }
+            Ok(Some(resolved == normalize_path(container_path)))
         }
-        // Target is not reported; accept but do not claim verification.
-        None => Ok(true),
+        None => Ok(None),
     }
+}
+
+/// A bridge we are willing to *reuse*: the link target must be known and match.
+async fn bridge_is_ours(afc: &mut AfcClient, bridge: &str, container_path: &str) -> bool {
+    matches!(
+        bridge_matches(afc, bridge, container_path).await,
+        Ok(Some(true))
+    )
+}
+
+/// A bridge we are willing to *operate through*: known and matching, or a
+/// target this iOS build cannot report (the caller opened it moments ago).
+async fn bridge_usable(afc: &mut AfcClient, bridge: &str, container_path: &str) -> bool {
+    matches!(
+        bridge_matches(afc, bridge, container_path).await,
+        Ok(Some(true)) | Ok(None)
+    )
 }
 
 /// Probe what the Media bridge actually permits.
@@ -954,19 +1009,14 @@ async fn bridge_open_async(
     let mut tunnel = exploit::connect_tunnel(&pairing_bytes, logger).await?;
     let mut afc = tunnel.connect_afc(logger).await?;
 
-    cleanup_stale_bridges(&mut afc).await;
-
-    // Cheap path first: ask AFC itself for the symlink.
-    let name = format!("readipa-bridge-{}", exploit::random_hex(6));
-    let made = afc
-        .link(&container_path, &name, LinkType::Symlink)
-        .await
-        .is_ok();
-
-    let bridge = if made {
-        name
-    } else {
-        create_bridge_atc(&mut tunnel, &mut afc, &container_path, logger).await?
+    // Reuse a bridge that already points at this container so opening the same
+    // container twice never creates duplicates (and never breaks another one).
+    let bridge = match find_usable_bridge(&mut afc, &container_path).await {
+        Some(existing) => {
+            logger.log(format!("reusing bridge {existing}"));
+            existing
+        }
+        None => make_bridge(&mut tunnel, &mut afc, &container_path, logger).await?,
     };
 
     let (direct_list, direct_read) = probe_bridge(&mut afc, &bridge).await;
@@ -1119,23 +1169,40 @@ pub(crate) async fn open_engine(
         logger.log("HouseArrest unavailable for this app; using the AirLift bridge");
     }
 
-    if bridge_name.is_empty() || !safe_media_name(bridge_name) {
-        return Err(
-            "No bridge for this container. Open the container again from the Apps tab.".to_string(),
-        );
-    }
-
     let mut afc = tunnel.connect_afc(logger).await?;
-    if !bridge_matches(&mut afc, bridge_name, container_path).await? {
-        return Err("Bridge does not point at the requested container; refusing to operate".into());
-    }
-    let (direct_list, direct_read) = probe_bridge(&mut afc, bridge_name).await;
+
+    // Self-heal: if the caller's bridge is gone (closed, cleaned up by the user
+    // or by an earlier build) recreate it instead of failing the operation.
+    let usable = if bridge_name.is_empty() || !safe_media_name(bridge_name) {
+        false
+    } else {
+        bridge_usable(&mut afc, bridge_name, container_path).await
+    };
+
+    let bridge = if usable {
+        bridge_name.to_string()
+    } else {
+        if !bridge_name.is_empty() && safe_media_name(bridge_name) {
+            logger.log(format!(
+                "bridge {bridge_name} is gone or points elsewhere; recreating"
+            ));
+        }
+        match find_usable_bridge(&mut afc, container_path).await {
+            Some(existing) => {
+                logger.log(format!("reusing bridge {existing}"));
+                existing
+            }
+            None => make_bridge(&mut tunnel, &mut afc, container_path, logger).await?,
+        }
+    };
+
+    let (direct_list, direct_read) = probe_bridge(&mut afc, &bridge).await;
 
     Ok((
         tunnel,
         Engine {
             afc,
-            bridge: bridge_name.to_string(),
+            bridge,
             direct_list,
             direct_read,
             house_arrest: false,
@@ -1353,8 +1420,10 @@ async fn fs_list_async(
                 )
             })?;
 
-        return Ok(serde_json::to_string_pretty(&json!({"entries": entries}))
-            .map_err(|e| e.to_string())?);
+        return Ok(serde_json::to_string_pretty(
+            &json!({"entries": entries, "bridge": engine.bridge}),
+        )
+        .map_err(|e| e.to_string())?);
     };
 
     for n in names {
@@ -1372,7 +1441,10 @@ async fn fs_list_async(
         }
     }
 
-    Ok(serde_json::to_string_pretty(&json!({"entries": entries})).map_err(|e| e.to_string())?)
+    Ok(
+        serde_json::to_string_pretty(&json!({"entries": entries, "bridge": engine.bridge}))
+            .map_err(|e| e.to_string())?,
+    )
 }
 
 /// Move a Media-staged item back into its container. `dst` must be the
@@ -2396,26 +2468,21 @@ async fn recover_leftover_async(
     let mut tunnel = exploit::connect_tunnel(&pairing_bytes, logger).await?;
     let mut afc = tunnel.connect_afc(logger).await?;
 
-    // Recovery always needs a Media-side bridge because ATAirlock only accepts
-    // destinations below Media. Create a throwaway one when the caller has none.
-    let (bridge_name, temporary) = if bridge.is_empty() || !safe_media_name(&bridge) {
-        cleanup_stale_bridges(&mut afc).await;
-        let name = format!("readipa-bridge-{}", exploit::random_hex(6));
-        let made = afc
-            .link(&container_path, &name, LinkType::Symlink)
-            .await
-            .is_ok();
-        let name = if made {
-            name
-        } else {
-            create_bridge_atc(&mut tunnel, &mut afc, &container_path, logger).await?
-        };
-        (name, true)
-    } else {
-        if !bridge_matches(&mut afc, &bridge, &container_path).await? {
-            return Err("Bridge does not point at the requested container".into());
-        }
+    // Recovery needs a Media-side bridge because ATAirlock only accepts
+    // destinations below Media. Reuse the caller's, or a matching one already in
+    // Media, before creating anything new.
+    let reliable = !bridge.is_empty()
+        && safe_media_name(&bridge)
+        && bridge_usable(&mut afc, &bridge, &container_path).await;
+    let (bridge_name, temporary) = if reliable {
         (bridge, false)
+    } else if let Some(existing) = find_usable_bridge(&mut afc, &container_path).await {
+        (existing, true)
+    } else {
+        (
+            make_bridge(&mut tunnel, &mut afc, &container_path, logger).await?,
+            true,
+        )
     };
 
     let dst = format!("{bridge_name}/{rel_path}");

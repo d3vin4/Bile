@@ -215,7 +215,7 @@ final class AppState: ObservableObject {
         let rel = currentRelPath
         Task {
             do {
-                let list = try RustBridge.list(
+                let result = try RustBridge.list(
                     pairingPath: pairingPath,
                     bundleId: c.bundleId,
                     containerPath: c.path,
@@ -223,7 +223,7 @@ final class AppState: ObservableObject {
                     bridge: bridge
                 )
                 var out: [FileEntry] = []
-                for d in list {
+                for d in result.entries {
                     let name = (d["name"] as? String) ?? ""
                     out.append(FileEntry(
                         id: name,
@@ -235,6 +235,10 @@ final class AppState: ObservableObject {
                     ))
                 }
                 await MainActor.run {
+                    if !result.bridge.isEmpty && result.bridge != self.bridge {
+                        // The core recreated the bridge; adopt it.
+                        self.bridge = result.bridge
+                    }
                     self.entries = out
                     self.isLoadingFiles = false
                 }

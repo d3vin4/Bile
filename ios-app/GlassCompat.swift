@@ -53,7 +53,7 @@ struct StatusChip: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(ok ? .green : .orange)
+                .foregroundStyle(ok ? Color.green : Color.orange)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.caption2).foregroundStyle(.secondary)
                 Text(value).font(.caption).bold()
