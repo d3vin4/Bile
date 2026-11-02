@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LogView: View {
     @EnvironmentObject var state: AppState
+    @EnvironmentObject var lang: LanguageManager
     @State private var filter = ""
 
     private var lines: [String] {
@@ -19,8 +20,8 @@ struct LogView: View {
                     .textSelection(.enabled)
             }
             .listStyle(.plain)
-            .searchable(text: $filter, prompt: "Filter logs")
-            .navigationTitle("Logs (\(state.log.count))")
+            .searchable(text: $filter, prompt: lang("filter.logs"))
+            .navigationTitle("\(lang("logs")) (\(state.log.count))")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -30,7 +31,7 @@ struct LogView: View {
                         Image(systemName: "square.and.arrow.up")
                     }
                     .disabled(state.log.isEmpty)
-                    Button("Clear") { state.log.removeAll() }
+                    Button(lang("clear")) { state.log.removeAll() }
                 }
             }
         }

@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct BrowserView: View {
     @EnvironmentObject var state: AppState
+    @EnvironmentObject var lang: LanguageManager
     @State private var showNewFolder = false
     @State private var newFolderName = ""
     @State private var showImporter = false
@@ -66,7 +67,7 @@ struct BrowserView: View {
             Image(systemName: "folder.badge.questionmark")
                 .font(.largeTitle)
                 .foregroundStyle(.secondary)
-            Text("Open a container from the Apps tab")
+            Text(lang("open.container.first"))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -124,7 +125,7 @@ struct BrowserView: View {
     private var content: some View {
         List {
             if state.isLoadingFiles {
-                HStack { ProgressView(); Text("Loading…").font(.caption).foregroundStyle(.secondary) }
+                HStack { ProgressView(); Text(lang("loading")).font(.caption).foregroundStyle(.secondary) }
             }
             if let e = state.filesError {
                 Text(e)
@@ -137,11 +138,11 @@ struct BrowserView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .searchable(text: $state.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Filter this folder")
+        .searchable(text: $state.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: lang("filter.this.folder"))
         .refreshable { state.loadFiles() }
         .overlay {
             if !state.isLoadingFiles && state.sortedEntries.isEmpty && state.filesError == nil {
-                Text(state.searchText.isEmpty ? "Empty folder" : "No match")
+                Text(state.searchText.isEmpty ? lang("empty.folder") : lang("no.match"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -178,7 +179,7 @@ struct BrowserView: View {
             Button(role: .destructive) {
                 deleteTarget = entry
                 showDeleteConfirm = true
-            } label: { Label("Delete", systemImage: "trash") }
+            } label: { Label(lang("delete"), systemImage: "trash") }
 
             Button {
                 renameTarget = entry
@@ -191,7 +192,7 @@ struct BrowserView: View {
             if !entry.isDir {
                 Button {
                     state.shareFile(entry)
-                } label: { Label("Save", systemImage: "square.and.arrow.up") }
+                } label: { Label(lang("save"), systemImage: "square.and.arrow.up") }
                 .tint(.green)
             }
         }
@@ -221,7 +222,7 @@ struct BrowserView: View {
         ToolbarItem(placement: .principal) {
             if state.selectedContainer != nil {
                 Menu {
-                    Button("Container root") { state.navigateHome() }
+                    Button(lang("container.root")) { state.navigateHome() }
                     ForEach(breadcrumbLevels, id: \.path) { level in
                         Button(level.title) { state.jump(to: level.path) }
                     }
@@ -240,7 +241,7 @@ struct BrowserView: View {
                 Menu {
                     Picker("Sort", selection: $state.sortOrder) {
                         ForEach(SortOrder.allCases) { order in
-                            Text(order.rawValue).tag(order)
+                            Text(lang(order.rawValue.lowercased().replacingOccurrences(of: " ", with: "."))).tag(order)
                         }
                     }
                 } label: {
@@ -259,8 +260,8 @@ struct BrowserView: View {
     private var newFolderSheet: some View {
         NavigationView {
             Form {
-                TextField("Folder name", text: $newFolderName)
-                Button("Create") {
+                TextField(lang("folder.name"), text: $newFolderName)
+                Button(lang("create")) {
                     if !newFolderName.isEmpty { state.createFolder(name: newFolderName) }
                     newFolderName = ""
                     showNewFolder = false
@@ -270,7 +271,7 @@ struct BrowserView: View {
             .navigationTitle("New folder")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showNewFolder = false }
+                    Button(lang("cancel")) { showNewFolder = false }
                 }
             }
         }
@@ -281,7 +282,7 @@ struct BrowserView: View {
         NavigationView {
             Form {
                 Section {
-                    TextField("New name", text: $renameName)
+                    TextField(lang("new.name"), text: $renameName)
                         .autocapitalization(.none)
                 } footer: {
                     Text("A name only renames. To move the item, include a path relative to this "
@@ -289,7 +290,7 @@ struct BrowserView: View {
                          + "overwrite an existing item.")
                     .font(.caption2)
                 }
-                Button("Apply") {
+                Button(lang("apply")) {
                     if let t = renameTarget, !renameName.isEmpty {
                         state.renameEntry(t, to: renameName)
                     }
@@ -297,10 +298,10 @@ struct BrowserView: View {
                 }
                 .disabled(renameName.isEmpty)
             }
-            .navigationTitle("Rename or move")
+            .navigationTitle(lang("rename.or.move"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showRename = false }
+                    Button(lang("cancel")) { showRename = false }
                 }
             }
         }
@@ -320,7 +321,7 @@ struct BrowserView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { state.showPreview = false }
+                    Button(lang("done")) { state.showPreview = false }
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {

@@ -3,6 +3,7 @@ import SwiftUI
 struct SetupView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var pairing: PairingController
+    @EnvironmentObject var lang: LanguageManager
     @State private var isPairing = false
     @State private var recoverTarget: LeftoverEntry? = nil
     @State private var recoverPath = ""
@@ -15,13 +16,21 @@ struct SetupView: View {
     var body: some View {
         NavigationView {
             Form {
+                Section {
+                    Picker(lang("language"), selection: $lang.language) {
+                        ForEach(AppLanguage.allCases) { l in
+                            Text(l.displayName).tag(l)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
                 pairingSection
                 tunnelSection
                 catalogSection
                 riskyMovesSection
                 recoverySection
             }
-            .navigationTitle("Readipa Setup")
+            .navigationTitle("Readipa " + lang("setup"))
             .sheet(isPresented: $showRecover) { recoverSheet }
             .alert("Enable risky moves?", isPresented: $showRiskyWarning) {
                 Button("Cancel", role: .cancel) { state.allowRiskyMoves = false }
@@ -70,9 +79,9 @@ struct SetupView: View {
     private var pairingSection: some View {
         Section {
             HStack {
-                Text("Status")
+                Text(lang("status"))
                 Spacer()
-                Text(state.hasPairingFile ? "Paired" : "Not paired")
+                Text(state.hasPairingFile ? lang("paired") : lang("not.paired"))
                     .foregroundStyle(state.hasPairingFile ? Color.green : Color.red)
                     .bold()
             }
@@ -82,7 +91,7 @@ struct SetupView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            Button("Start Pairing") {
+            Button(lang("start.pairing")) {
                 isPairing = true
                 Task {
                     do {
@@ -102,7 +111,7 @@ struct SetupView: View {
             if isPairing {
                 HStack(spacing: 8) {
                     ProgressView()
-                    Text("Waiting… approve the request in Settings").font(.caption)
+                    Text(lang("waiting.approve")).font(.caption)
                 }
             }
             if let pin = pairing.pairingPIN {
@@ -130,7 +139,7 @@ struct SetupView: View {
                 state.refreshPairingFile()
             }
         } header: {
-            Text("Pairing")
+            Text(lang("pairing"))
         } footer: {
             Text(pairing.pairingStatus).font(.caption2)
         }
@@ -140,7 +149,7 @@ struct SetupView: View {
 
     private var tunnelSection: some View {
         Section {
-            TextField("Device IP", text: $state.deviceIP)
+            TextField(lang("device.ip"), text: $state.deviceIP)
                 .keyboardType(.decimalPad)
                 .autocapitalization(.none)
 
@@ -151,7 +160,7 @@ struct SetupView: View {
             }
             .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
 
-            Button("Test tunnel") { state.testTunnel() }
+            Button(lang("test.tunnel")) { state.testTunnel() }
                 .disabled(state.isTestingTunnel)
             if state.isTestingTunnel { ProgressView() }
 
@@ -165,7 +174,7 @@ struct SetupView: View {
                 }
             }
         } header: {
-            Text("Tunnel")
+            Text(lang("tunnel"))
         } footer: {
             Text("Checks RSD (49152) and lockdownd (62078) on 10.7.0.1 and 192.168.1.2. "
                  + "Start the loopback VPN (LocalDevVPN / StosVPN) before pairing.")
@@ -177,14 +186,14 @@ struct SetupView: View {
 
     private var catalogSection: some View {
         Section {
-            Button("Load App Catalog") { state.loadCatalog() }
+            Button(lang("load.app.catalog")) { state.loadCatalog() }
                 .disabled(!state.hasPairingFile)
             if state.isLoadingCatalog { ProgressView() }
             if let e = state.catalogError {
                 Text(e).foregroundStyle(.red).font(.caption).textSelection(.enabled)
             }
         } header: {
-            Text("Catalog")
+            Text(lang("catalog"))
         }
     }
 
@@ -192,7 +201,7 @@ struct SetupView: View {
 
     private var riskyMovesSection: some View {
         Section {
-            Toggle("Allow risky moves", isOn: Binding(
+            Toggle(lang("allow.risky.moves"), isOn: Binding(
                 get: { state.allowRiskyMoves },
                 set: { newValue in
                     if newValue {
@@ -209,7 +218,7 @@ struct SetupView: View {
                     .foregroundStyle(.orange)
             }
         } header: {
-            Text("AirLift move mode")
+            Text(lang("airlift.move.mode"))
         } footer: {
             Text("Needed only for containers that refuse both listing and reading. "
                  + "Read-only access never relocates anything.")
@@ -232,17 +241,17 @@ struct SetupView: View {
     private var recoverySection: some View {
         Section {
             HStack(spacing: 8) {
-                Button("Scan") { state.scanLeftovers() }
+                Button(lang("scan")) { state.scanLeftovers() }
                     .disabled(!state.hasPairingFile)
                 Spacer()
                 if safeLeftoverCount > 0 {
-                    Button("Clean empty (\(safeLeftoverCount))") { showCleanupConfirm = true }
+                    Button("\(lang("clean.empty")) (\(safeLeftoverCount))") { showCleanupConfirm = true }
                         .foregroundStyle(.orange)
                 }
             }
 
             if state.leftovers.isEmpty {
-                Text("Nothing to recover").font(.caption).foregroundStyle(.secondary)
+                Text(lang("nothing.to.recover")).font(.caption).foregroundStyle(.secondary)
             }
 
             ForEach(leftoverGroups, id: \.kind) { group in
@@ -262,7 +271,7 @@ struct SetupView: View {
                             }
                             Spacer()
                             Menu {
-                                Button("Restore into open container…") {
+                                Button(lang("restore.into")) {
                                     recoverTarget = item
                                     recoverPath = ""
                                     showRecover = true
@@ -288,7 +297,7 @@ struct SetupView: View {
                 }
             }
         } header: {
-            Text("Recovery")
+            Text(lang("recovery"))
         } footer: {
             Text("Temporary items Readipa left in /var/mobile/Media — usually bridge links and empty "
                  + "staging folders, which hold no data. “Clean empty” removes only those. "
@@ -300,13 +309,13 @@ struct SetupView: View {
     private var recoverSheet: some View {
         NavigationView {
             Form {
-                Section("Leftover") {
+                Section(lang("leftover")) {
                     Text(recoverTarget?.name ?? "").font(.caption.monospaced())
                     Text(recoverTarget?.explain ?? "")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                Section("Restore into") {
+                Section(lang("restore.into")) {
                     if let c = state.selectedContainer {
                         Text(c.name).font(.caption)
                         TextField("destination folder (empty = container root)", text: $recoverPath)
@@ -319,17 +328,17 @@ struct SetupView: View {
                     }
                 }
                 Section {
-                    Button("Restore") {
+                    Button(lang("restore")) {
                         if let item = recoverTarget {
                             state.recoverLeftover(item, intoFolder: recoverPath)
                         }
                         showRecover = false
                     }
                     .disabled(state.selectedContainer == nil)
-                    Button("Cancel") { showRecover = false }
+                    Button(lang("cancel")) { showRecover = false }
                 }
             }
-            .navigationTitle("Restore leftover")
+            .navigationTitle(lang("restore.leftover"))
         }
     }
 }

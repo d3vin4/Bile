@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AppsView: View {
     @EnvironmentObject var state: AppState
+    @EnvironmentObject var lang: LanguageManager
     @State private var search = ""
     @State private var mode: Int = 0
 
@@ -29,7 +30,7 @@ struct AppsView: View {
         NavigationView {
             VStack(spacing: 0) {
                 Picker("", selection: $mode) {
-                    Label("Apps", systemImage: "square.grid.2x2").tag(0)
+                    Label(lang("tab.apps"), systemImage: "square.grid.2x2").tag(0)
                     Label("App Groups", systemImage: "square.stack.3d.up").tag(1)
                 }
                 .pickerStyle(.segmented)
@@ -44,8 +45,8 @@ struct AppsView: View {
                     groupList
                 }
             }
-            .searchable(text: $search, prompt: mode == 0 ? "Search apps or bundle id" : "Search groups or owner")
-            .navigationTitle(mode == 0 ? "Apps" : "App Groups")
+            .searchable(text: $search, prompt: mode == 0 ? lang("search.apps") : lang("search.groups"))
+            .navigationTitle(mode == 0 ? lang("apps") : lang("app.groups"))
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { state.loadCatalog() } label: {
@@ -126,6 +127,7 @@ struct AppAvatar: View {
 }
 
 struct AppRow: View {
+    @EnvironmentObject var lang: LanguageManager
     let app: AppEntry
     var body: some View {
         HStack(spacing: 10) {
@@ -166,6 +168,7 @@ struct AppRow: View {
 }
 
 struct GroupRow: View {
+    @EnvironmentObject var lang: LanguageManager
     let group: GroupEntry
     let ownerNames: [String]
     @EnvironmentObject var state: AppState
@@ -186,7 +189,7 @@ struct GroupRow: View {
                         name: shortGroupName
                     )
                 } label: {
-                    Label("Open", systemImage: "folder")
+                    Label(lang("open.in.files"), systemImage: "folder")
                         .font(.caption)
                 }
                 .readipaGlassButton()
@@ -225,11 +228,12 @@ struct GroupRow: View {
 
 struct AppDetailView: View {
     @EnvironmentObject var state: AppState
+    @EnvironmentObject var lang: LanguageManager
     let app: AppEntry
 
     var body: some View {
         Form {
-            Section("Application") {
+            Section(lang("apps")) {
                 HStack(spacing: 10) {
                     AppAvatar(name: app.name)
                     VStack(alignment: .leading) {
@@ -239,14 +243,14 @@ struct AppDetailView: View {
                     }
                 }
                 if !app.version.isEmpty {
-                    HStack { Text("Version"); Spacer(); Text(app.version).foregroundStyle(.secondary) }
+                    HStack { Text(lang("version")); Spacer(); Text(app.version).foregroundStyle(.secondary) }
                 }
-                HStack { Text("Type"); Spacer(); Text(app.type).foregroundStyle(.secondary) }
+                HStack { Text(lang("type")); Spacer(); Text(app.type).foregroundStyle(.secondary) }
             }
 
-            Section("Data Container") {
+            Section(lang("data.container")) {
                 if app.dataContainer.isEmpty {
-                    Text("This app has no data container").font(.caption).foregroundStyle(.secondary)
+                    Text(lang("no.container")).font(.caption).foregroundStyle(.secondary)
                 } else {
                     Text(app.dataContainer)
                         .font(.caption2.monospaced())
@@ -254,14 +258,14 @@ struct AppDetailView: View {
                     Button {
                         state.openContainer(path: app.dataContainer, bundleId: app.bundleId, name: app.name)
                     } label: {
-                        Label("Open in Files", systemImage: "folder")
+                        Label(lang("open.in.files"), systemImage: "folder")
                     }
                     .readipaGlassButton(prominent: true)
                 }
             }
 
             if !app.groupContainers.isEmpty {
-                Section("App Groups") {
+                Section(lang("app.groups")) {
                     ForEach(app.groupContainers.sorted(by: { $0.key < $1.key }), id: \.key) { key, path in
                         Button {
                             state.openContainer(path: path, bundleId: app.bundleId, name: key)

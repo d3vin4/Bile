@@ -20,6 +20,7 @@ struct ReadipaApp: App {
             RootView()
                 .environmentObject(state)
                 .environmentObject(pairing)
+                .environmentObject(LanguageManager.shared)
                 .task {
                     // Restore credentials from the Keychain before reporting
                     // "not paired" — a relaunch must never lose the pairing.
@@ -34,20 +35,21 @@ struct ReadipaApp: App {
 
 struct RootView: View {
     @EnvironmentObject var state: AppState
+    @EnvironmentObject var lang: LanguageManager
 
     var body: some View {
         let tabs = TabView(selection: $state.selectedTab) {
             SetupView()
-                .tabItem { Label("Setup", systemImage: "gear") }
+                .tabItem { Label(lang("tab.setup"), systemImage: "gear") }
                 .tag(AppTab.setup)
             AppsView()
-                .tabItem { Label("Apps", systemImage: "app.badge") }
+                .tabItem { Label(lang("tab.apps"), systemImage: "app.badge") }
                 .tag(AppTab.apps)
             BrowserView()
-                .tabItem { Label("Files", systemImage: "folder") }
+                .tabItem { Label(lang("tab.files"), systemImage: "folder") }
                 .tag(AppTab.files)
             LogView()
-                .tabItem { Label("Logs", systemImage: "text.alignleft") }
+                .tabItem { Label(lang("tab.logs"), systemImage: "text.alignleft") }
                 .tag(AppTab.logs)
         }
 
