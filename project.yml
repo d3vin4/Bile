@@ -19,7 +19,6 @@ settings:
     # Liquid Glass: the iOS 26 SDK opts in by default. Stated explicitly so the
     # intent survives future toolchain changes.
     UIDesignRequiresCompatibility: NO
-    SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY: YES
     ENABLE_USER_SCRIPT_SANDBOXING: NO
 
 targets:
