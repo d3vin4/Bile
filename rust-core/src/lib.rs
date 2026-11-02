@@ -311,6 +311,29 @@ pub unsafe extern "C" fn al_fs_remove(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn al_export_leftover(
+    pairing_path: *const c_char,
+    name: *const c_char,
+    dest_local_path: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        fsengine::export_leftover(pairing_path, name, dest_local_path, log_cb, ctx, out_error)
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(e) => {
+            if !out_error.is_null() {
+                *out_error = ffi_util::cstr(format!("Rust panic in al_export_leftover: {e:?}"));
+            }
+            1
+        }
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn al_app_icon(
     pairing_path: *const c_char,
     bundle_id: *const c_char,

@@ -2788,3 +2788,95 @@ async fn delete_leftover_async(
     let mut afc = tunnel.connect_afc(logger).await?;
     remove_tree_safe(&mut afc, &name).await
 }
+
+/// Copy a leftover out of Media to a local file so the user can save it with
+/// the share sheet — useful when a folder cannot be put back into a container.
+pub unsafe fn export_leftover(
+    pairing_path: *const c_char,
+    name: *const c_char,
+    dest_local_path: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let pairing_path = opt_str(pairing_path, "airlift_pairing.plist");
+    let name = opt_str(name, "");
+    let dest_local_path = opt_str(dest_local_path, "");
+    let ctx_usize = ctx as usize;
+
+    if !safe_media_name(&name)
+        || !(name.starts_with("readipa-") || name.starts_with("airlift-"))
+        || dest_local_path.is_empty()
+    {
+        if !out_error.is_null() {
+            *out_error = cstr("invalid leftover or destination");
+        }
+        return 1;
+    }
+
+    let res = crate::ffi_util::run_with_large_stack("al_export_leftover", move || {
+        let logger = Logger {
+            cb: log_cb,
+            ctx: ctx_usize as *mut c_void,
+        };
+        idevice_ffi::run_sync_local(export_leftover_async(
+            pairing_path.clone(),
+            name.clone(),
+            dest_local_path.clone(),
+            &logger,
+        ))
+    });
+
+    match res {
+        Ok(Ok(())) => 0,
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                *out_error = cstr(e);
+            }
+            1
+        }
+        Err(p) => {
+            if !out_error.is_null() {
+                *out_error = cstr(p);
+            }
+            1
+        }
+    }
+}
+
+async fn export_leftover_async(
+    pairing_path: String,
+    name: String,
+    dest_local_path: String,
+    logger: &Logger,
+) -> Result<(), String> {
+    let pairing_bytes = read_pairing(&pairing_path)?;
+    let mut tunnel = exploit::connect_tunnel(&pairing_bytes, logger).await?;
+    let mut afc = tunnel.connect_afc(logger).await?;
+
+    let info = afc
+        .get_file_info(&name)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    if let Some(parent) = std::path::Path::new(&dest_local_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    if info.st_ifmt.contains("DIR") {
+        // Folders are zipped so their contents survive.
+        let file = std::fs::File::create(&dest_local_path)
+            .map_err(|e| format!("cannot create {dest_local_path}: {e}"))?;
+        let mut exporter = crate::export::Exporter::new(file);
+        crate::export::archive_tree(&mut afc, &name, &name, &mut exporter, logger).await;
+        exporter.finish()?;
+        return Ok(());
+    }
+
+    let mut fd = afc
+        .open(&name, AfcFopenMode::RdOnly)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    let r = stream_afc_to_local(&mut fd, &dest_local_path).await;
+    let _ = fd.close().await;
+    r.map(|_| ())
+}

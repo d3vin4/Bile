@@ -486,23 +486,108 @@ final class AppState: ObservableObject {
         return c.path + "/" + relPath(for: entry)
     }
 
-    func importFile(from url: URL) {
-        guard let c = selectedContainer else { return }
-        let name = url.lastPathComponent
-        let rel = currentRelPath.isEmpty ? name : currentRelPath + "/" + name
-        let local = FileManager.default.temporaryDirectory.appendingPathComponent(name).path
+    /// Imports one or many files. Each URL gets its own security-scoped access
+    /// window (required for anything picked outside the app sandbox), and the
+    /// files are streamed through the Rust core one by one so a failure never
+    /// aborts the whole batch.
+    func importFiles(from urls: [URL]) {
+        guard let c = selectedContainer, !urls.isEmpty else { return }
+        let folder = currentRelPath
+        logLine("Importing \(urls.count) file(s) into \(c.name)\(folder.isEmpty ? "" : "/" + folder)…")
         Task {
-            let secured = url.startAccessingSecurityScopedResource()
-            defer { if secured { url.stopAccessingSecurityScopedResource() } }
-            do {
-                let data = try Data(contentsOf: url)
-                try data.write(to: URL(fileURLWithPath: local))
-                try RustBridge.write(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, srcLocalPath: local)
-                await MainActor.run { loadFiles() }
-            } catch {
-                await MainActor.run { logLine("Import failed: \(error.localizedDescription)") }
+            var ok = 0
+            var failed: [String] = []
+            for url in urls {
+                let name = url.lastPathComponent
+                let secured = url.startAccessingSecurityScopedResource()
+                defer { if secured { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    // Coordinated read: works for iCloud Drive and other
+                    // providers that hand out placeholder files.
+                    let data = try Self.readCoordinated(url)
+                    guard !data.isEmpty || FileManager.default.fileExists(atPath: url.path) else {
+                        throw NSError(domain: "Readipa", code: 1,
+                                      userInfo: [NSLocalizedDescriptionKey: "file is empty or unreadable"])
+                    }
+                    let local = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(name).path
+                    try data.write(to: URL(fileURLWithPath: local))
+                    try RustBridge.write(
+                        pairingPath: pairingPath,
+                        bundleId: c.bundleId,
+                        containerPath: c.path,
+                        relPath: folder.isEmpty ? name : folder + "/" + name,
+                        bridge: bridge,
+                        srcLocalPath: local
+                    )
+                    try? FileManager.default.removeItem(atPath: local)
+                    ok += 1
+                } catch {
+                    failed.append("\(name): \(error.localizedDescription)")
+                }
+            }
+            let copied = ok
+            let problems = failed
+            await MainActor.run {
+                if copied > 0 { self.logLine("Imported \(copied) file(s) ✅") }
+                for problem in problems { self.logLine("Import failed — \(problem)") }
+                self.loadFiles()
             }
         }
+    }
+
+    /// Reads a picked file through NSFileCoordinator so cloud/placeholder files
+    /// are downloaded before the read.
+    nonisolated private static func readCoordinated(_ url: URL) throws -> Data {
+        var coordinatorError: NSError?
+        var readError: Error?
+        var result = Data()
+        let coordinator = NSFileCoordinator()
+        coordinator.coordinate(readingItemAt: url, options: [], error: &coordinatorError) { readURL in
+            do {
+                result = try Data(contentsOf: readURL)
+            } catch {
+                readError = error
+            }
+        }
+        if let coordinatorError { throw coordinatorError }
+        if let readError { throw readError }
+        return result
+    }
+
+    /// Saves a Media leftover to a shareable local copy (folders become a ZIP).
+    func saveLeftoverCopy(_ item: LeftoverEntry) {
+        let ext = item.isDir ? "zip" : "bin"
+        let base = item.name.replacingOccurrences(of: "/", with: "-")
+        let dest = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(base).\(ext)")
+        logLine("Copying leftover \(item.name)…")
+        Task {
+            do {
+                try RustBridge.exportLeftover(
+                    pairingPath: pairingPath,
+                    name: item.name,
+                    destLocalPath: dest.path
+                )
+                await MainActor.run {
+                    self.exportedFileURL = dest
+                    self.showShareSheet = true
+                    self.logLine("Leftover copy ready: \(dest.lastPathComponent) ✅")
+                }
+            } catch {
+                await MainActor.run { self.logLine("Leftover copy failed: \(error.localizedDescription)") }
+            }
+        }
+    }
+
+    /// Folders available as a restore destination in the open container.
+    var folderChoices: [String] {
+        var choices = [""]
+        choices.append(contentsOf: entries.filter(\.isDir).map(\.name))
+        for sub in ["Documents", "Library", "Library/Preferences", "Library/Caches", "tmp"] {
+            if !choices.contains(sub) { choices.append(sub) }
+        }
+        return choices
     }
 
     // MARK: - Recovery

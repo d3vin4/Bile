@@ -31,8 +31,12 @@ struct BrowserView: View {
             .sheet(isPresented: $showNewFolder) { newFolderSheet }
             .sheet(isPresented: $showRename) { renameSheet }
             .sheet(isPresented: $state.showPreview) { previewSheet }
-            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.data]) { result in
-                if case .success(let url) = result { state.importFile(from: url) }
+            .fileImporter(
+                isPresented: $showImporter,
+                allowedContentTypes: [.data],
+                allowsMultipleSelection: true
+            ) { result in
+                if case .success(let urls) = result { state.importFiles(from: urls) }
             }
             .fileImporter(isPresented: $showReplace, allowedContentTypes: [.data]) { result in
                 if case .success(let url) = result, let target = replaceTarget {

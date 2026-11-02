@@ -25,7 +25,7 @@ const CHUNK: usize = 256 * 1024;
 const MAX_DEPTH: usize = 64;
 const MAX_ENTRIES: u64 = 200_000;
 
-struct Exporter {
+pub(crate) struct Exporter {
     zip: zip::ZipWriter<std::fs::File>,
     files: u64,
     bytes: u64,
@@ -35,7 +35,7 @@ struct Exporter {
 }
 
 impl Exporter {
-    fn new(file: std::fs::File) -> Self {
+    pub(crate) fn new(file: std::fs::File) -> Self {
         Self {
             zip: zip::ZipWriter::new(file),
             files: 0,
@@ -46,7 +46,7 @@ impl Exporter {
         }
     }
 
-    fn start_file(&mut self, name: &str) -> Result<(), String> {
+    pub(crate) fn start_file(&mut self, name: &str) -> Result<(), String> {
         let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated)
             .unix_permissions(0o644);
@@ -68,11 +68,11 @@ impl Exporter {
             .map_err(|e| e.to_string())
     }
 
-    fn write(&mut self, data: &[u8]) -> Result<(), String> {
+    pub(crate) fn write(&mut self, data: &[u8]) -> Result<(), String> {
         self.zip.write_all(data).map_err(|e| e.to_string())
     }
 
-    fn finish(self) -> Result<(), String> {
+    pub(crate) fn finish(self) -> Result<(), String> {
         self.zip.finish().map_err(|e| e.to_string()).map(|_| ())
     }
 }
@@ -104,7 +104,7 @@ async fn copy_file(
 }
 
 /// Walk `root_afc` and add everything below it to the archive.
-async fn archive_tree(
+pub(crate) async fn archive_tree(
     afc: &mut AfcClient,
     root_afc: &str,
     prefix: &str,

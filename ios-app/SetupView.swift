@@ -5,79 +5,39 @@ struct SetupView: View {
     @EnvironmentObject var pairing: PairingController
     @EnvironmentObject var lang: LanguageManager
     @State private var isPairing = false
-    @State private var recoverTarget: LeftoverEntry? = nil
-    @State private var recoverPath = ""
-    @State private var showRecover = false
-    @State private var deleteTarget: LeftoverEntry? = nil
-    @State private var showDeleteLeftover = false
     @State private var showRiskyWarning = false
-    @State private var showCleanupConfirm = false
 
     var body: some View {
         NavigationView {
             Form {
-                Section {
-                    Picker(lang("language"), selection: $lang.language) {
-                        ForEach(AppLanguage.allCases) { l in
-                            Text(l.displayName).tag(l)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
+                languageSection
                 pairingSection
                 tunnelSection
                 catalogSection
                 riskyMovesSection
                 recoverySection
+                iconCacheSection
             }
             .navigationTitle("Readipa " + lang("setup"))
-            .sheet(isPresented: $showRecover) { recoverSheet }
-            .alert("Enable risky moves?", isPresented: $showRiskyWarning) {
-                Button("Cancel", role: .cancel) { state.allowRiskyMoves = false }
-                Button("I understand", role: .destructive) { state.allowRiskyMoves = true }
+            .alert(lang("enable.risky.moves"), isPresented: $showRiskyWarning) {
+                Button(lang("cancel"), role: .cancel) { state.allowRiskyMoves = false }
+                Button(lang("i.understand"), role: .destructive) { state.allowRiskyMoves = true }
             } message: {
-                Text("Containers that block direct access are only readable by temporarily moving a "
-                     + "folder out of the app into /var/mobile/Media and back.\n\n"
-                     + "Readipa verifies every move and always puts the folder back, and if anything "
-                     + "goes wrong it tells you exactly where the data is kept — but for those seconds "
-                     + "the app really is missing that folder.\n\n"
-                     + "Moving live app data can also make iOS reclaim space afterwards (apps may "
-                     + "lose their caches, and the device can behave oddly until it settles). "
-                     + "Leave this OFF unless you really need to browse an App Group, and turn it "
-                     + "back off when you are done.")
-            }
-            .confirmationDialog(
-                "Delete “\(deleteTarget?.name ?? "")”?",
-                isPresented: $showDeleteLeftover,
-                titleVisibility: .visible
-            ) {
-                Button("Delete permanently", role: .destructive) {
-                    if let t = deleteTarget { state.deleteLeftover(t) }
-                    deleteTarget = nil
-                }
-                Button("Cancel", role: .cancel) { deleteTarget = nil }
-            } message: {
-                Text(deleteTarget?.safeToRemove == true
-                     ? "This leftover holds no data, so nothing is lost."
-                     : "This leftover CONTAINS DATA. Deleting it cannot be undone.")
-            }
-            .confirmationDialog(
-                "Remove empty leftovers?",
-                isPresented: $showCleanupConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Remove \(safeLeftoverCount) empty items", role: .destructive) {
-                    state.cleanupLeftovers()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Only bridge links and empty folders are removed. Anything that still contains "
-                     + "files is kept and stays listed.")
+                Text(lang("risky.moves.explain"))
             }
         }
     }
 
-    // MARK: - Pairing
+    private var languageSection: some View {
+        Section {
+            Picker(lang("language"), selection: $lang.language) {
+                ForEach(AppLanguage.allCases) { l in
+                    Text(l.displayName).tag(l)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
 
     private var pairingSection: some View {
         Section {
@@ -90,7 +50,7 @@ struct SetupView: View {
             }
             if state.hasPairingFile {
                 Text(PairingStore.fileName).font(.caption).foregroundStyle(.secondary)
-                Text("Kept in Documents and the Keychain — relaunching keeps it.")
+                Text(lang("stored.in.documents.keychain"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -101,9 +61,9 @@ struct SetupView: View {
                         let path = try await pairing.startAndWait()
                         PairingController.syncCanonicalPairingFile(from: path)
                         state.refreshPairingFile()
-                        state.logLine("Pairing succeeded")
+                        state.logLine(lang("pairing.succeeded"))
                     } catch {
-                        state.logLine("Pairing failed: \(error.localizedDescription)")
+                        state.logLine("\(lang("pairing.failed")): \(error.localizedDescription)")
                     }
                     isPairing = false
                 }
@@ -122,22 +82,18 @@ struct SetupView: View {
                     Text(pin)
                         .font(.system(size: 28, weight: .bold, design: .monospaced))
                         .textSelection(.enabled)
-                    VStack(alignment: .leading) {
-                        Text("Enter in Settings › Privacy & Security ›")
-                        Text("Developer Mode › Pair with Readipa")
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    Text(lang("enter.in.settings"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
             }
             if !state.liveActivitiesEnabled {
-                Text("Live Activities are off for Readipa, so the PIN stays on this screen only. "
-                     + "Enable Settings › Readipa › Live Activities to keep it on the Lock Screen.")
+                Text(lang("live.activities.off"))
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
-            Button("Delete Pairing Credentials", role: .destructive) {
+            Button(lang("delete.pairing"), role: .destructive) {
                 PairingController.deleteStoredPairingCredentials()
                 state.refreshPairingFile()
             }
@@ -147,8 +103,6 @@ struct SetupView: View {
             Text(pairing.pairingStatus).font(.caption2)
         }
     }
-
-    // MARK: - Tunnel
 
     private var tunnelSection: some View {
         Section {
@@ -178,20 +132,14 @@ struct SetupView: View {
             }
             let hint = TunnelProbe.hint(for: state.tunnelResults)
             if !hint.isEmpty {
-                Text(hint)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
+                Text(hint).font(.caption2).foregroundStyle(.orange)
             }
         } header: {
             Text(lang("tunnel"))
         } footer: {
-            Text("Checks RSD (49152) and lockdownd (62078) on 10.7.0.1 and 192.168.1.2. "
-                 + "Start the loopback VPN (LocalDevVPN / StosVPN) before pairing.")
-            .font(.caption2)
+            Text(lang("tunnel.checks")).font(.caption2)
         }
     }
-
-    // MARK: - Catalog
 
     private var catalogSection: some View {
         Section {
@@ -206,8 +154,6 @@ struct SetupView: View {
         }
     }
 
-    // MARK: - Risky moves
-
     private var riskyMovesSection: some View {
         Section {
             Toggle(lang("allow.risky.moves"), isOn: Binding(
@@ -221,144 +167,56 @@ struct SetupView: View {
                 }
             ))
             if state.allowRiskyMoves {
-                Label("Risky moves are ON — folders may be relocated for a few seconds.",
-                      systemImage: "exclamationmark.triangle.fill")
+                Label(lang("risky.moves.on"), systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
         } header: {
             Text(lang("airlift.move.mode"))
         } footer: {
-            Text("Needed only for containers that refuse both listing and reading. "
-                 + "Read-only access never relocates anything.")
-            .font(.caption2)
+            Text(lang("risky.moves.needed")).font(.caption2)
         }
-    }
-
-    // MARK: - Recovery
-
-    private var safeLeftoverCount: Int {
-        state.leftovers.filter(\.safeToRemove).count
-    }
-
-    private var leftoverGroups: [(kind: String, items: [LeftoverEntry])] {
-        Dictionary(grouping: state.leftovers, by: \.kind)
-            .map { (kind: $0.key, items: $0.value.sorted { $0.name < $1.name }) }
-            .sorted { $0.kind < $1.kind }
     }
 
     private var recoverySection: some View {
         Section {
-            if state.needsRecoveryCheck {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("A previous operation may have been interrupted",
-                          systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption.bold())
-                    Text("Tap Scan to see whether a folder is still in Media, then restore it.")
-                        .font(.caption2)
-                }
-                .foregroundStyle(.orange)
-            }
-
-            HStack(spacing: 8) {
-                Button(lang("scan")) { state.scanLeftovers() }
-                    .disabled(!state.hasPairingFile)
-                Spacer()
-                if safeLeftoverCount > 0 {
-                    Button("\(lang("clean.empty")) (\(safeLeftoverCount))") { showCleanupConfirm = true }
-                        .foregroundStyle(.orange)
-                }
-            }
-
-            if state.leftovers.isEmpty {
-                Text(lang("nothing.to.recover")).font(.caption).foregroundStyle(.secondary)
-            }
-
-            ForEach(leftoverGroups, id: \.kind) { group in
-                DisclosureGroup {
-                    ForEach(group.items) { item in
-                        HStack(spacing: 8) {
-                            Image(systemName: item.isLink ? "link" : (item.isDir ? "folder" : "doc"))
-                                .foregroundStyle(item.safeToRemove ? Color.secondary : Color.orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.name)
-                                    .font(.caption.monospaced())
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text("\(item.explain) · \(FileEntry.prettySize(item.size))")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Menu {
-                                Button(lang("restore.into")) {
-                                    recoverTarget = item
-                                    recoverPath = ""
-                                    showRecover = true
-                                }
-                                Button("Delete…", role: .destructive) {
-                                    deleteTarget = item
-                                    showDeleteLeftover = true
-                                }
-                            } label: {
-                                Image(systemName: "ellipsis.circle")
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text(group.kind)
-                        Spacer()
-                        Text("\(group.items.count)")
+            NavigationLink(destination: RecoveryView()) {
+                HStack {
+                    Label(lang("recovery"), systemImage: "arrow.uturn.backward.circle")
+                    Spacer()
+                    if !state.leftovers.isEmpty {
+                        Text("\(state.leftovers.count)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
+            if state.needsRecoveryCheck {
+                Label("A previous operation may have been interrupted",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         } header: {
             Text(lang("recovery"))
         } footer: {
-            Text("Temporary items Readipa left in /var/mobile/Media — usually bridge links and empty "
-                 + "staging folders, which hold no data. “Clean empty” removes only those. "
-                 + "Anything containing files stays until you delete it yourself.")
-            .font(.caption2)
+            Text("Temporary items Readipa left in /var/mobile/Media. Nothing is ever deleted "
+                 + "automatically.")
+                .font(.caption2)
         }
     }
 
-    private var recoverSheet: some View {
-        NavigationView {
-            Form {
-                Section(lang("leftover")) {
-                    Text(recoverTarget?.name ?? "").font(.caption.monospaced())
-                    Text(recoverTarget?.explain ?? "")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Section(lang("restore.into")) {
-                    if let c = state.selectedContainer {
-                        Text(c.name).font(.caption)
-                        TextField("destination folder (empty = container root)", text: $recoverPath)
-                            .autocapitalization(.none)
-                    } else {
-                        Text("Open a container in the Apps tab first — the leftover is restored into "
-                             + "the container you are currently browsing.")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                }
-                Section {
-                    Button(lang("restore")) {
-                        if let item = recoverTarget {
-                            state.recoverLeftover(item, intoFolder: recoverPath)
-                        }
-                        showRecover = false
-                    }
-                    .disabled(state.selectedContainer == nil)
-                    Button(lang("cancel")) { showRecover = false }
-                }
+    private var iconCacheSection: some View {
+        Section {
+            Button(lang("refresh.icons")) {
+                IconStore.shared.clearCache()
+                state.logLine("Icon cache cleared — icons reload as you scroll")
             }
-            .navigationTitle(lang("restore.leftover"))
+        } header: {
+            Text(lang("icons"))
+        } footer: {
+            Text("App icons come from SpringBoard and are cached locally.")
+                .font(.caption2)
         }
     }
 }

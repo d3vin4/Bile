@@ -168,6 +168,14 @@ void al_clear_target_hosts(void);
 // Container catalog & file system (Application Containers + App Groups)
 // ---------------------------------------------------------------------------
 
+// Copy a leftover item out of Media to a local file (folders are zipped).
+int32_t al_export_leftover(const char *pairing_path,
+                           const char *name,
+                           const char *dest_local_path,
+                           ALLogCallback log_cb,
+                           void *ctx,
+                           char **out_error);
+
 // Fetch the real app icon (PNG) from SpringBoard and write it to a local file.
 int32_t al_app_icon(const char *pairing_path,
                     const char *bundle_id,
