@@ -962,9 +962,11 @@ async fn bridge_open_async(
         create_bridge_atc(&mut tunnel, &mut afc, &container_path, logger).await?
     };
 
-    let direct = afc.list_dir(&bridge).await.is_ok();
-    let mode = if direct {
+    let (direct_list, direct_read) = probe_bridge(&mut afc, &bridge).await;
+    let mode = if direct_list {
         "bridge_direct"
+    } else if direct_read {
+        "bridge_readonly"
     } else {
         "bridge_move"
     };
