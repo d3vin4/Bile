@@ -48,7 +48,7 @@ pub fn set_allow_risky_moves(v: bool) {
     ALLOW_RISKY_MOVES.store(v, Ordering::SeqCst);
 }
 
-fn risky_moves_allowed() -> bool {
+pub(crate) fn risky_moves_allowed() -> bool {
     ALLOW_RISKY_MOVES.load(Ordering::SeqCst)
 }
 
@@ -56,7 +56,7 @@ fn risky_moves_allowed() -> bool {
 // Path validation
 // ---------------------------------------------------------------------------
 
-fn normalize_path(p: &str) -> String {
+pub(crate) fn normalize_path(p: &str) -> String {
     let p = p.trim();
     if p.starts_with("/private/var/") {
         p.replacen("/private/var/", "/var/", 1)
@@ -70,7 +70,7 @@ fn has_unsafe_components(p: &str) -> bool {
 }
 
 /// True only for a real container below one of the two allowed roots.
-fn allowed_container(p: &str) -> bool {
+pub(crate) fn allowed_container(p: &str) -> bool {
     if p.is_empty() || p.contains('\0') {
         return false;
     }
@@ -88,7 +88,7 @@ fn allowed_container(p: &str) -> bool {
 }
 
 /// True for a container-relative path that cannot escape the container.
-fn safe_rel(rel: &str) -> bool {
+pub(crate) fn safe_rel(rel: &str) -> bool {
     if rel.is_empty() {
         return true;
     }
@@ -124,7 +124,7 @@ fn posix_rel(path: &str, base: &str) -> String {
     rel.join("/")
 }
 
-fn read_pairing(pairing_path: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn read_pairing(pairing_path: &str) -> Result<Vec<u8>, String> {
     std::fs::read(pairing_path)
         .map_err(|e| format!("Failed to read pairing file at {pairing_path}: {e}"))
 }
@@ -621,7 +621,7 @@ async fn wait_absent(afc: &mut AfcClient, path: &str, attempts: u32) -> bool {
 ///
 /// `src_abs` is an absolute device path; `dst` is either a Media-relative name
 /// (move out of a container) or a `bridge/...` Media path (move into a container).
-async fn move_path(
+pub(crate) async fn move_path(
     tunnel: &mut AppDeviceTunnel,
     afc: &mut AfcClient,
     src_abs: &str,
@@ -1009,15 +1009,15 @@ async fn bridge_close_async(
 // Engine resolution
 // ---------------------------------------------------------------------------
 
-struct Engine {
-    afc: AfcClient,
-    bridge: String,
-    direct: bool,
-    house_arrest: bool,
+pub(crate) struct Engine {
+    pub(crate) afc: AfcClient,
+    pub(crate) bridge: String,
+    pub(crate) direct: bool,
+    pub(crate) house_arrest: bool,
 }
 
 impl Engine {
-    fn path(&self, rel: &str) -> String {
+    pub(crate) fn path(&self, rel: &str) -> String {
         if self.house_arrest {
             if rel.is_empty() {
                 "/".to_string()
@@ -1032,7 +1032,7 @@ impl Engine {
     }
 
     /// Container-absolute path for a relative entry (used for AirTraffic moves).
-    fn abs_path(&self, container_path: &str, rel: &str) -> String {
+    pub(crate) fn abs_path(&self, container_path: &str, rel: &str) -> String {
         if rel.is_empty() {
             container_path.to_string()
         } else {
@@ -1041,7 +1041,7 @@ impl Engine {
     }
 }
 
-async fn open_engine(
+pub(crate) async fn open_engine(
     pairing_path: &str,
     bundle_id: &str,
     container_path: &str,
@@ -1325,7 +1325,7 @@ async fn fs_list_async(
 /// Move a Media-staged item back into its container. `dst` must be the
 /// bridge-relative destination (a Media-relative string), never an absolute
 /// container path — ATAirlock only accepts destinations below Media.
-async fn restore_staged_dir(
+pub(crate) async fn restore_staged_dir(
     tunnel: &mut AppDeviceTunnel,
     afc: &mut AfcClient,
     staging: &str,

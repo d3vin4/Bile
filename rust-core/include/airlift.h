@@ -263,6 +263,21 @@ int32_t al_fs_rename(const char *pairing_path,
 // list it. Disabled by default because it moves live app data.
 void al_set_allow_risky_moves(int32_t enabled);
 
+// Read-only bulk export of a container into a local ZIP archive.
+// Symbols links are recorded, never followed. In move mode the subtree is
+// relocated once and always moved back (with verification).
+int32_t al_export_container(const char *pairing_path,
+                            const char *bundle_id,
+                            const char *container_path,
+                            const char *rel_path,
+                            const char *bridge,
+                            const char *dest_zip_path,
+                            const char *root_name,
+                            ALLogCallback log_cb,
+                            void *ctx,
+                            char **out_json,
+                            char **out_error);
+
 // List readipa-*/airlift-* leftovers in /var/mobile/Media (never deletes them).
 int32_t al_media_leftovers(const char *pairing_path,
                            ALLogCallback log_cb,

@@ -79,6 +79,45 @@ enum RustBridge {
         free(outErr)
     }
 
+    static func exportContainer(
+        pairingPath: String,
+        bundleId: String,
+        containerPath: String,
+        relPath: String,
+        bridge: String,
+        destZipPath: String,
+        rootName: String
+    ) throws -> [String: Any] {
+        var outJson: UnsafeMutablePointer<CChar>?
+        var outErr: UnsafeMutablePointer<CChar>?
+        let rc = withCString(pairingPath) { pp in
+            withCString(bundleId) { bi in
+                withCString(containerPath) { cp in
+                    withCString(relPath) { rp in
+                        withCString(bridge) { bp in
+                            withCString(destZipPath) { zp in
+                                withCString(rootName) { rn in
+                                    al_export_container(pp, bi, cp, rp, bp, zp, rn, logCallback, nil, &outJson, &outErr)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        defer { free(outJson); free(outErr) }
+        if rc != 0 {
+            let msg = outErr.map { String(cString: $0) } ?? "export failed"
+            throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        guard let json = outJson.map({ String(cString: $0) }),
+              let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return obj
+    }
+
     static func bridgeOpen(pairingPath: String, containerPath: String) throws -> (bridge: String, mode: String, requiresRiskyMoves: Bool) {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?

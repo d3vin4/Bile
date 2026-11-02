@@ -5,17 +5,25 @@ import SwiftUI
 final class AppState: ObservableObject {
     static let shared = AppState()
 
+    // MARK: - Pairing / tunnel
+
     @Published var pairingStatus: String = ""
     @Published var hasPairingFile: Bool = false
     @Published var pairingFileName: String = ""
     @Published var pairingPIN: String? = nil
-    @Published var pairingPhase: PairingPhase = .idle
     @Published var deviceIP: String = "10.7.0.1"
+    @Published var tunnelResults: [TunnelProbe.Result] = []
+    @Published var isTestingTunnel = false
+    @Published var liveActivitiesEnabled = PairingController.liveActivitiesEnabled
+
+    // MARK: - Catalog
 
     @Published var apps: [AppEntry] = []
     @Published var groups: [GroupEntry] = []
     @Published var isLoadingCatalog = false
     @Published var catalogError: String? = nil
+
+    // MARK: - Browsing
 
     @Published var selectedContainer: (path: String, bundleId: String, name: String)? = nil
     @Published var bridge: String = ""
@@ -24,20 +32,27 @@ final class AppState: ObservableObject {
     @Published var entries: [FileEntry] = []
     @Published var isLoadingFiles = false
     @Published var filesError: String? = nil
+    @Published var sortOrder: SortOrder = .kind
+    @Published var searchText = ""
+
+    // MARK: - Output
 
     @Published var log: [String] = []
     @Published var exportedFileURL: URL? = nil
     @Published var showShareSheet: Bool = false
+    @Published var previewName: String? = nil
+    @Published var previewText: String? = nil
+    @Published var showPreview = false
+    @Published var isExporting = false
     @Published var bridgeRequiresRiskyMoves = false
     @Published var leftovers: [FileEntry] = []
+
     @Published var allowRiskyMoves: Bool = UserDefaults.standard.bool(forKey: "readipa.allowRiskyMoves") {
         didSet {
             UserDefaults.standard.set(allowRiskyMoves, forKey: "readipa.allowRiskyMoves")
             RustBridge.setAllowRiskyMoves(allowRiskyMoves)
         }
     }
-
-    enum PairingPhase: Equatable { case idle, pairing }
 
     init() {
         // didSet does not fire during initialization.
@@ -46,15 +61,70 @@ final class AppState: ObservableObject {
 
     var pairingPath: String { PairingController.pairingFilePath() }
 
+    // MARK: - Helpers
+
     func logLine(_ s: String) { log.append(s) }
 
-    func refreshPairingFile() {
-        let path = PairingController.pairingFilePath()
-        let exists = FileManager.default.fileExists(atPath: path) &&
-            ((try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0) > 0
-        hasPairingFile = exists
-        pairingFileName = exists ? (path as NSString).lastPathComponent : ""
+    var sortedEntries: [FileEntry] {
+        let query = searchText.lowercased()
+        let filtered = query.isEmpty
+            ? entries
+            : entries.filter { $0.name.lowercased().contains(query) }
+
+        switch sortOrder {
+        case .nameAscending:
+            return filtered.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        case .nameDescending:
+            return filtered.sorted { $0.name.localizedStandardCompare($1.name) == .orderedDescending }
+        case .sizeDescending:
+            return filtered.sorted { $0.size > $1.size }
+        case .sizeAscending:
+            return filtered.sorted { $0.size < $1.size }
+        case .kind:
+            return filtered.sorted { a, b in
+                if a.isDir != b.isDir { return a.isDir }
+                if a.isLink != b.isLink { return b.isLink }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+        }
     }
+
+    var currentPathDisplay: String {
+        let base = selectedContainer?.name ?? ""
+        return base + (currentRelPath.isEmpty ? "" : "/" + currentRelPath)
+    }
+
+    // MARK: - Pairing
+
+    func refreshPairingFile() {
+        // Touch the store so a Keychain-only pairing is restored to disk.
+        let path = PairingController.pairingFilePath()
+        let data = try? Data(contentsOf: URL(fileURLWithPath: path))
+        hasPairingFile = (data?.isEmpty == false)
+        pairingFileName = hasPairingFile ? PairingStore.fileName : ""
+    }
+
+    // MARK: - Tunnel
+
+    func testTunnel() {
+        isTestingTunnel = true
+        let hosts = TunnelProbe.candidates(userHost: deviceIP)
+        Task.detached(priority: .userInitiated) {
+            let results = TunnelProbe.probe(hosts: hosts)
+            await MainActor.run {
+                self.tunnelResults = results
+                self.isTestingTunnel = false
+                if let best = results.first(where: { $0.ok }) {
+                    self.deviceIP = best.host
+                    self.logLine("tunnel: using \(best.host) — \(best.summary)")
+                } else {
+                    self.logLine("tunnel: no reachable host. Start the loopback VPN (LocalDevVPN / StosVPN) and try again.")
+                }
+            }
+        }
+    }
+
+    // MARK: - Catalog
 
     func loadCatalog() {
         guard hasPairingFile else { catalogError = "No pairing file"; return }
@@ -97,12 +167,15 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Container
+
     func openContainer(path: String, bundleId: String, name: String) {
         selectedContainer = (path, bundleId, name)
         bridge = ""
         bridgeMode = ""
         currentRelPath = ""
         entries = []
+        searchText = ""
         Task {
             do {
                 let (b, m, risky) = try RustBridge.bridgeOpen(pairingPath: pairingPath, containerPath: path)
@@ -127,28 +200,34 @@ final class AppState: ObservableObject {
         bridgeMode = ""
         entries = []
         currentRelPath = ""
+        searchText = ""
     }
 
     func loadFiles() {
         guard let c = selectedContainer else { return }
         isLoadingFiles = true
         filesError = nil
+        let rel = currentRelPath
         Task {
             do {
-                let list = try RustBridge.list(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: currentRelPath, bridge: bridge)
+                let list = try RustBridge.list(
+                    pairingPath: pairingPath,
+                    bundleId: c.bundleId,
+                    containerPath: c.path,
+                    relPath: rel,
+                    bridge: bridge
+                )
                 var out: [FileEntry] = []
                 for d in list {
+                    let name = (d["name"] as? String) ?? ""
                     out.append(FileEntry(
-                        id: (d["name"] as? String) ?? UUID().uuidString,
-                        name: (d["name"] as? String) ?? "",
+                        id: name,
+                        name: name,
                         isDir: (d["isDir"] as? Bool) ?? false,
+                        isLink: (d["isLink"] as? Bool) ?? false,
                         size: (d["size"] as? Int) ?? 0,
                         modified: (d["modified"] as? String) ?? ""
                     ))
-                }
-                out.sort { (a, b) in
-                    if a.isDir != b.isDir { return a.isDir }
-                    return a.name < b.name
                 }
                 await MainActor.run {
                     self.entries = out
@@ -181,14 +260,19 @@ final class AppState: ObservableObject {
         return "/" + currentRelPath
     }
 
+    private func relPath(for entry: FileEntry) -> String {
+        currentRelPath.isEmpty ? entry.name : currentRelPath + "/" + entry.name
+    }
+
+    // MARK: - File operations
+
     func exportFile(_ entry: FileEntry, to destURL: URL) {
         guard let c = selectedContainer else { return }
-        let rel = currentRelPath.isEmpty ? entry.name : currentRelPath + "/" + entry.name
+        let rel = relPath(for: entry)
         let local = FileManager.default.temporaryDirectory.appendingPathComponent(entry.name).path
         Task {
             do {
                 try RustBridge.read(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, destLocalPath: local)
-                // copy to dest
                 let src = URL(fileURLWithPath: local)
                 try? FileManager.default.removeItem(at: destURL)
                 try FileManager.default.copyItem(at: src, to: destURL)
@@ -199,9 +283,96 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Reads a file into a temp copy and hands the URL to the share sheet
+    /// ("Save to Files"). Never touches the original in the container.
+    func shareFile(_ entry: FileEntry) {
+        guard let c = selectedContainer else { return }
+        let rel = relPath(for: entry)
+        let local = FileManager.default.temporaryDirectory.appendingPathComponent(entry.name)
+        logLine("Reading \(rel)…")
+        Task {
+            do {
+                try RustBridge.read(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, destLocalPath: local.path)
+                await MainActor.run {
+                    exportedFileURL = local
+                    showShareSheet = true
+                    logLine("Ready to save \(entry.name) ✅")
+                }
+            } catch {
+                await MainActor.run { logLine("Export failed: \(error.localizedDescription)") }
+            }
+        }
+    }
+
+    /// Safe bulk export: the Rust core walks the container read-only and writes
+    /// a ZIP locally; symlinks are recorded, never followed.
+    func exportContainerAsZip() {
+        guard let c = selectedContainer else { return }
+        isExporting = true
+        let stamp = ISO8601DateFormatter().string(from: Date()).prefix(10)
+        let safeName = c.name.replacingOccurrences(of: "/", with: "-")
+        let zip = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(safeName)-\(stamp).zip")
+        let rel = currentRelPath
+        logLine("Exporting \(c.name)\(rel.isEmpty ? "" : "/" + rel) to ZIP…")
+        Task {
+            do {
+                let json = try RustBridge.exportContainer(
+                    pairingPath: pairingPath,
+                    bundleId: c.bundleId,
+                    containerPath: c.path,
+                    relPath: rel,
+                    bridge: bridge,
+                    destZipPath: zip.path,
+                    rootName: safeName
+                )
+                await MainActor.run {
+                    isExporting = false
+                    exportedFileURL = zip
+                    showShareSheet = true
+                    let files = (json["files"] as? Int) ?? 0
+                    let bytes = (json["bytes"] as? Int) ?? 0
+                    let failures = (json["failures"] as? [String]) ?? []
+                    logLine("Export done: \(files) files, \(FileEntry.prettySize(bytes)) ✅")
+                    if !failures.isEmpty {
+                        logLine("Export warnings (\(failures.count)):")
+                        for f in failures.prefix(20) { logLine("  • \(f)") }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isExporting = false
+                    logLine("Export failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    func preview(_ entry: FileEntry) {
+        guard let c = selectedContainer else { return }
+        let rel = relPath(for: entry)
+        let local = FileManager.default.temporaryDirectory.appendingPathComponent(entry.name).path
+        logLine("Loading preview of \(rel)…")
+        Task {
+            do {
+                try RustBridge.read(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, destLocalPath: local)
+                let data = (try? Data(contentsOf: URL(fileURLWithPath: local))) ?? Data()
+                let text = String(data: data.prefix(256 * 1024), encoding: .utf8)
+                    ?? "(binary file — \(FileEntry.prettySize(data.count)))"
+                await MainActor.run {
+                    previewName = entry.name
+                    previewText = text
+                    showPreview = true
+                }
+            } catch {
+                await MainActor.run { logLine("Preview failed: \(error.localizedDescription)") }
+            }
+        }
+    }
+
     func deleteEntry(_ entry: FileEntry) {
         guard let c = selectedContainer else { return }
-        let rel = currentRelPath.isEmpty ? entry.name : currentRelPath + "/" + entry.name
+        let rel = relPath(for: entry)
         Task {
             do {
                 try RustBridge.remove(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge)
@@ -227,7 +398,7 @@ final class AppState: ObservableObject {
 
     func renameEntry(_ entry: FileEntry, to newName: String) {
         guard let c = selectedContainer else { return }
-        let oldRel = currentRelPath.isEmpty ? entry.name : currentRelPath + "/" + entry.name
+        let oldRel = relPath(for: entry)
         let newRel = currentRelPath.isEmpty ? newName : currentRelPath + "/" + newName
         Task {
             do {
@@ -258,13 +429,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Push the persisted risky-moves preference into the Rust core.
-    func syncRiskyMovesSetting() {
-        RustBridge.setAllowRiskyMoves(allowRiskyMoves)
-    }
+    // MARK: - Recovery
 
-    /// List temporary items this app left in /var/mobile/Media. Nothing is ever
-    /// deleted automatically — this is how you notice a failed move.
     func scanLeftovers() {
         guard hasPairingFile else { return }
         Task {
@@ -275,6 +441,7 @@ final class AppState: ObservableObject {
                         id: (d["name"] as? String) ?? UUID().uuidString,
                         name: (d["name"] as? String) ?? "",
                         isDir: (d["isDir"] as? Bool) ?? false,
+                        isLink: (d["isLink"] as? Bool) ?? false,
                         size: (d["size"] as? Int) ?? 0,
                         modified: (d["modified"] as? String) ?? ""
                     )
@@ -314,5 +481,3 @@ final class AppState: ObservableObject {
         }
     }
 }
-
-enum PairingPhase { case idle, pairing }

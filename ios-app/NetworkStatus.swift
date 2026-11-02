@@ -48,6 +48,15 @@ enum NetworkStatus {
         return (vpn, wifi, detail)
     }
 
+    /// Addresses of tunnel interfaces only (utun/ipsec/tap/ppp).
+    static func tunnelAddresses() -> [String] {
+        interfaces().filter { isTunnelInterface($0.name) }.map(\.ipv4)
+    }
+
+    static func isIPv4(_ value: String) -> Bool {
+        ipv4Value(value) != nil
+    }
+
     static func loopbackTunnelUp(deviceIP: String) -> Bool {
         isLoopbackTunnelUp(in: interfaces(), deviceIP: deviceIP)
     }

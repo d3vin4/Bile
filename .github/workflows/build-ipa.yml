@@ -10,10 +10,17 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    # macOS 26 / Xcode 26.x — required for the iOS 26 SDK (Liquid Glass).
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

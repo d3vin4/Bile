@@ -10,7 +10,7 @@ final class PairingController: ObservableObject {
 
     static let shared = PairingController()
 
-    private let hostName = "AirCard-iOS"
+    private let hostName = "Readipa"
     private let hostModel = "Mac17,7"   // device sees a Mac-like pairing host
     private let bindAddress = "0.0.0.0"
 
@@ -28,7 +28,7 @@ final class PairingController: ObservableObject {
 
     /// Persisted altIRK keeps the host identity stable across pairings so a
     /// device that has already paired recognises this host.
-    private static let altIRKKey = "aircardPairingHostAltIRK"
+    private static let altIRKKey = "readipa.pairingHostAltIRK"
     nonisolated private static var storedAltIRK: String {
         get { UserDefaults.standard.string(forKey: altIRKKey) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: altIRKKey) }
@@ -47,77 +47,42 @@ final class PairingController: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .busy: return "Pairing is already in progress."
-            case .localNetworkDenied: return "Local Network permission is off. Enable it in Settings › AirCard-iOS › Local Network."
+            case .localNetworkDenied: return "Local Network permission is off. Enable it in Settings › Readipa › Local Network."
             case .zeroBytes: return "Pairing produced an empty file. Approve the pairing request, then try again."
             case let .failed(msg): return msg
             }
         }
     }
 
-    /// Ensures the given pairing file is mirrored to canonical aircard_pairing.plist and airlift_pairing.plist.
+    /// Stores the pairing file in Documents *and* the Keychain so a relaunch
+    /// (or a reinstall that wipes the container) never loses the pairing.
     @discardableResult
     static func syncCanonicalPairingFile(from sourcePath: String) -> String {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let aircardURL = dir.appendingPathComponent("aircard_pairing.plist")
-        let airliftURL = dir.appendingPathComponent("airlift_pairing.plist")
-
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: sourcePath)), !data.isEmpty {
-            if sourcePath != aircardURL.path {
-                try? data.write(to: aircardURL, options: .atomic)
-            }
-            if sourcePath != airliftURL.path {
-                try? data.write(to: airliftURL, options: .atomic)
-            }
-            customPairingFilePath = aircardURL.path
-            return aircardURL.path
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: sourcePath)) {
+            _ = PairingStore.write(data)
         }
-        return sourcePath
+        return PairingStore.canonicalURL.path
     }
 
-    /// Deletes every credential copy created or adopted by AirCard and clears the stored AltIRK.
+    /// Restores the credentials from the Keychain if the file is missing.
+    /// Called on every launch before the UI reports "not paired".
+    @discardableResult
+    static func restorePairingIfNeeded() -> Bool {
+        PairingStore.read() != nil
+    }
+
+    /// Deletes every credential copy created or adopted by Readipa.
     static func deleteStoredPairingCredentials() {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let aircardURL = dir.appendingPathComponent("aircard_pairing.plist")
-        let airliftURL = dir.appendingPathComponent("airlift_pairing.plist")
-        try? FileManager.default.removeItem(at: aircardURL)
-        try? FileManager.default.removeItem(at: airliftURL)
-        if let custom = customPairingFilePath {
-            if custom != aircardURL.path && custom != airliftURL.path {
-                try? FileManager.default.removeItem(atPath: custom)
-            }
-            customPairingFilePath = nil
-        }
+        PairingStore.deleteAll()
+        customPairingFilePath = nil
         storedAltIRK = ""
     }
 
-    /// Path where the pairing file is written or read from.
-    /// Checks for canonical aircard_pairing.plist, airlift_pairing.plist, or custom path.
+    /// Path the pairing file is written to and read from.
     static func pairingFilePath() -> String {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let aircardPath = dir.appendingPathComponent("aircard_pairing.plist").path
-        if FileManager.default.fileExists(atPath: aircardPath) {
-            let size = (try? FileManager.default.attributesOfItem(atPath: aircardPath)[.size] as? Int) ?? 0
-            if size > 0 { return aircardPath }
-        }
-
-        let airliftPath = dir.appendingPathComponent("airlift_pairing.plist").path
-        if FileManager.default.fileExists(atPath: airliftPath) {
-            let size = (try? FileManager.default.attributesOfItem(atPath: airliftPath)[.size] as? Int) ?? 0
-            if size > 0 {
-                _ = syncCanonicalPairingFile(from: airliftPath)
-                return aircardPath
-            }
-        }
-
-        if let custom = customPairingFilePath, FileManager.default.fileExists(atPath: custom) {
-            let size = (try? FileManager.default.attributesOfItem(atPath: custom)[.size] as? Int) ?? 0
-            if size > 0 {
-                _ = syncCanonicalPairingFile(from: custom)
-                return aircardPath
-            }
-        }
-
-        return aircardPath
+        // Touch the store first so a Keychain-only pairing is restored.
+        _ = PairingStore.read()
+        return PairingStore.canonicalURL.path
     }
 
     /// Start the host and resolve with the pairing-file path, or throw.
@@ -156,12 +121,17 @@ final class PairingController: ObservableObject {
         pairingPIN = nil
         pairingStatus = "Starting local host…"
 
+        // Show the Live Activity from the very first moment: the PIN arrives a
+        // few seconds later and is pushed into the same activity.
+        startPairingActivity(pin: nil)
+
         Task {
             _ = await localNetwork.request()
             guard running else { return }
 
             keepAlive.startAudio()
             pairingStatus = "Broadcasting… open Settings to pair"
+            updatePairingActivity(status: "Waiting for Settings › Developer Mode…")
             runHost()
         }
     }
@@ -268,26 +238,69 @@ final class PairingController: ObservableObject {
 
     fileprivate func presentPin(_ pin: String) {
         pairingPIN = pin
-        pairingStatus = "Enter PIN \(pin) in Settings › Privacy & Security › Developer Mode › Pair with AirCard-iOS"
-        startPairingActivity(pin: pin)
+        pairingStatus = "Enter PIN \(pin) in Settings › Privacy & Security › Developer Mode › Pair with Readipa"
+        updatePairingActivity(pin: pin, status: "Enter this PIN in Settings › Developer Mode")
     }
 
-    private func startPairingActivity(pin: String) {
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        let attrs = PairingActivityAttributes(deviceName: "Readipa")
-        let state = PairingActivityAttributes.ContentState(pin: pin, status: "Enter this PIN in Settings › Developer Mode")
+    // MARK: - Live Activity
+
+    static var liveActivitiesEnabled: Bool {
+        ActivityAuthorizationInfo().areActivitiesEnabled
+    }
+
+    /// Requests the Live Activity. Safe to call twice — the second call updates
+    /// the existing one instead of creating another.
+    private func startPairingActivity(pin: String?) {
+        guard Self.liveActivitiesEnabled else {
+            PairingController.log("Live Activities are disabled for Readipa in Settings › Readipa › Live Activities")
+            return
+        }
+        if pairingActivity != nil {
+            updatePairingActivity(pin: pin, status: "Waiting for Settings › Developer Mode…")
+            return
+        }
+        let attributes = PairingActivityAttributes(deviceName: "Readipa")
+        let state = PairingActivityAttributes.ContentState(
+            pin: pin ?? "······",
+            status: "Waiting for Settings › Developer Mode…"
+        )
         do {
-            pairingActivity = try Activity.request(attributes: attrs, content: .init(state: state, staleDate: nil), pushType: nil)
+            pairingActivity = try Activity.request(
+                attributes: attributes,
+                content: .init(state: state, staleDate: nil),
+                pushType: nil
+            )
+            PairingController.log("Live Activity started (\(pairingActivity?.id ?? "?")) ✅")
         } catch {
-            // ignore
+            PairingController.log("Live Activity could not start: \(error.localizedDescription)")
+        }
+    }
+
+    private func updatePairingActivity(pin: String? = nil, status: String) {
+        guard let activity = pairingActivity else {
+            // Not started yet (e.g. the PIN arrived first): start it now.
+            startPairingActivity(pin: pin)
+            return
+        }
+        let next = PairingActivityAttributes.ContentState(
+            pin: pin ?? activity.content.state.pin,
+            status: status
+        )
+        Task {
+            await activity.update(.init(state: next, staleDate: nil))
         }
     }
 
     private func endPairingActivity() {
+        guard let activity = pairingActivity else { return }
+        pairingActivity = nil
         Task {
-            await pairingActivity?.end(nil, dismissalPolicy: .immediate)
-            pairingActivity = nil
+            await activity.end(nil, dismissalPolicy: .immediate)
         }
+    }
+
+    nonisolated private static func log(_ message: String) {
+        DispatchQueue.main.async { AppState.shared.logLine("pairing: \(message)") }
     }
 
     private func stopAdvertising() {

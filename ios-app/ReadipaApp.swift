@@ -17,23 +17,40 @@ struct ReadipaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .environmentObject(state)
                 .environmentObject(pairing)
+                .task {
+                    // Restore credentials from the Keychain before reporting
+                    // "not paired" — a relaunch must never lose the pairing.
+                    _ = PairingController.restorePairingIfNeeded()
+                    state.refreshPairingFile()
+                    state.liveActivitiesEnabled = PairingController.liveActivitiesEnabled
+                    state.logLine("Readipa ready — pairing file: \(state.hasPairingFile ? "found" : "missing")")
+                }
         }
     }
 }
 
-struct ContentView: View {
+struct RootView: View {
     @EnvironmentObject var state: AppState
-    @State private var tab = 0
 
     var body: some View {
-        TabView(selection: $tab) {
-            SetupView().tabItem { Label("Setup", systemImage: "gear") }.tag(0)
-            AppsView().tabItem { Label("Apps", systemImage: "app.badge") }.tag(1)
-            BrowserView().tabItem { Label("Files", systemImage: "folder") }.tag(2)
-            LogView().tabItem { Label("Logs", systemImage: "text.alignleft") }.tag(3)
+        let tabs = TabView {
+            SetupView()
+                .tabItem { Label("Setup", systemImage: "gear") }
+            AppsView()
+                .tabItem { Label("Apps", systemImage: "app.badge") }
+            BrowserView()
+                .tabItem { Label("Files", systemImage: "folder") }
+            LogView()
+                .tabItem { Label("Logs", systemImage: "text.alignleft") }
+        }
+
+        if #available(iOS 26.0, *) {
+            tabs.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            tabs
         }
     }
 }
