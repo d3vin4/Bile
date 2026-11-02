@@ -47,6 +47,7 @@ struct RootView: View {
         }
     }
 
+    @ViewBuilder
     private var mainTabs: some View {
         let tabs = TabView(selection: $state.selectedTab) {
             SetupView()

@@ -367,7 +367,7 @@ final class AppState: ObservableObject {
                     relPath: rel,
                     bridge: bridge,
                     destZipPath: zip.path,
-                    rootName: safeName
+                    rootName: baseName
                 )
                 await MainActor.run {
                     isExporting = false
