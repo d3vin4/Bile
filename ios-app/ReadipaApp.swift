@@ -27,6 +27,7 @@ struct ReadipaApp: App {
                     state.refreshPairingFile()
                     state.liveActivitiesEnabled = PairingController.liveActivitiesEnabled
                     state.logLine("Readipa ready — pairing file: \(state.hasPairingFile ? "found" : "missing")")
+                    state.startupMaintenance()
                 }
         }
     }

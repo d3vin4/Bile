@@ -379,6 +379,26 @@ fn build_books_plist(identifiers: &[String]) -> Result<Vec<u8>, String> {
 // AirTraffic primitives
 // ---------------------------------------------------------------------------
 
+/// One stable "library" identity per app run. Using a fresh random id for every
+/// sync makes the device remember a new phantom host each time, which leaves
+/// sync state behind; a stable id keeps the device's Books database clean.
+static LIBRARY_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn library_id() -> String {
+    LIBRARY_ID
+        .get_or_init(|| {
+            format!(
+                "{}-{}-{}-{}-{}",
+                exploit::random_hex(4),
+                exploit::random_hex(2),
+                exploit::random_hex(2),
+                exploit::random_hex(2),
+                exploit::random_hex(6)
+            )
+        })
+        .clone()
+}
+
 /// Stage `bytes` into `/var/mobile/Media/<subdir>` via streaming_zip_conduit.
 async fn stage_minimal(
     tunnel: &mut AppDeviceTunnel,
@@ -490,15 +510,7 @@ async fn atc_file_complete(
         "SyncHostName".into(),
         plist::Value::String("readipa".into()),
     );
-    let library_id = format!(
-        "{}-{}-{}-{}-{}",
-        exploit::random_hex(4),
-        exploit::random_hex(2),
-        exploit::random_hex(2),
-        exploit::random_hex(2),
-        exploit::random_hex(6)
-    );
-    host_info.insert("LibraryID".into(), plist::Value::String(library_id));
+    host_info.insert("LibraryID".into(), plist::Value::String(library_id()));
     host_info.insert(
         "SyncedDataclasses".into(),
         plist::Value::Array(vec![plist::Value::String("Book".into())]),

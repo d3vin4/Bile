@@ -40,8 +40,11 @@ struct SetupView: View {
                      + "folder out of the app into /var/mobile/Media and back.\n\n"
                      + "Readipa verifies every move and always puts the folder back, and if anything "
                      + "goes wrong it tells you exactly where the data is kept — but for those seconds "
-                     + "the app really is missing that folder. Only enable this for App Groups you "
-                     + "need to inspect.")
+                     + "the app really is missing that folder.\n\n"
+                     + "Moving live app data can also make iOS reclaim space afterwards (apps may "
+                     + "lose their caches, and the device can behave oddly until it settles). "
+                     + "Leave this OFF unless you really need to browse an App Group, and turn it "
+                     + "back off when you are done.")
             }
             .confirmationDialog(
                 "Delete “\(deleteTarget?.name ?? "")”?",
@@ -246,6 +249,17 @@ struct SetupView: View {
 
     private var recoverySection: some View {
         Section {
+            if state.needsRecoveryCheck {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("A previous operation may have been interrupted",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.bold())
+                    Text("Tap Scan to see whether a folder is still in Media, then restore it.")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.orange)
+            }
+
             HStack(spacing: 8) {
                 Button(lang("scan")) { state.scanLeftovers() }
                     .disabled(!state.hasPairingFile)

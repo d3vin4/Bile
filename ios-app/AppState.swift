@@ -45,6 +45,7 @@ final class AppState: ObservableObject {
     @Published var showPreview = false
     @Published var isExporting = false
     @Published var bridgeRequiresRiskyMoves = false
+    @Published var needsRecoveryCheck = false
     @Published var leftovers: [LeftoverEntry] = []
     @Published var selectedTab: AppTab = .setup
     @Published var pathHistory: [String] = []
@@ -212,6 +213,8 @@ final class AppState: ObservableObject {
         guard let c = selectedContainer else { return }
         isLoadingFiles = true
         filesError = nil
+        let risky = bridgeMode == "bridge_move" && allowRiskyMoves
+        if risky { beginRiskyOperation("listing \(c.name)/\(currentRelPath)") }
         let rel = currentRelPath
         Task {
             do {
@@ -241,11 +244,13 @@ final class AppState: ObservableObject {
                     }
                     self.entries = out
                     self.isLoadingFiles = false
+                    if risky { self.endRiskyOperation() }
                 }
             } catch {
                 await MainActor.run {
                     self.filesError = error.localizedDescription
                     self.isLoadingFiles = false
+                    if risky { self.endRiskyOperation() }
                 }
             }
         }
@@ -350,6 +355,8 @@ final class AppState: ObservableObject {
         let zip = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(baseName)-\(stamp).zip")
         let rel = relPathOverride ?? currentRelPath
+        let risky = bridgeMode == "bridge_move" && allowRiskyMoves
+        if risky { beginRiskyOperation("exporting \(c.name)/\(rel)") }
         logLine("Exporting \(c.name)\(rel.isEmpty ? "" : "/" + rel) to ZIP…")
         Task {
             do {
@@ -364,6 +371,7 @@ final class AppState: ObservableObject {
                 )
                 await MainActor.run {
                     isExporting = false
+                    if risky { endRiskyOperation() }
                     exportedFileURL = zip
                     showShareSheet = true
                     let files = (json["files"] as? Int) ?? 0
@@ -378,6 +386,7 @@ final class AppState: ObservableObject {
             } catch {
                 await MainActor.run {
                     isExporting = false
+                    if risky { endRiskyOperation() }
                     logLine("Export failed: \(error.localizedDescription)")
                 }
             }
@@ -497,6 +506,45 @@ final class AppState: ObservableObject {
     }
 
     // MARK: - Recovery
+
+    // MARK: - Risk journal
+
+    private static let journalKey = "readipa.riskyOpInFlight"
+
+    /// Marks that a folder may be relocated right now. If the app dies during
+    /// the operation the mark survives, and the next launch points at Recovery.
+    private func beginRiskyOperation(_ what: String) {
+        UserDefaults.standard.set(what, forKey: Self.journalKey)
+    }
+
+    private func endRiskyOperation() {
+        UserDefaults.standard.removeObject(forKey: Self.journalKey)
+    }
+
+    /// Called once per launch: reports an interrupted relocation and clears the
+    /// junk Media accumulates (bridge links and empty staging folders only).
+    func startupMaintenance() {
+        if let pending = UserDefaults.standard.string(forKey: Self.journalKey) {
+            logLine("⚠️ A previous operation may have been interrupted: \(pending)")
+            logLine("   Open Setup › Recovery › Scan to check for leftover folders.")
+            needsRecoveryCheck = true
+        }
+        guard hasPairingFile else { return }
+        Task {
+            do {
+                let json = try RustBridge.cleanupLeftovers(pairingPath: pairingPath)
+                let removed = (json["removed"] as? Int) ?? 0
+                let kept = (json["kept"] as? Int) ?? 0
+                if removed > 0 || kept > 0 {
+                    await MainActor.run {
+                        logLine("Startup cleanup: removed \(removed) empty leftovers, kept \(kept) containing data")
+                    }
+                }
+            } catch {
+                // Not fatal — the tunnel may simply be down.
+            }
+        }
+    }
 
     func scanLeftovers() {
         guard hasPairingFile else { return }
