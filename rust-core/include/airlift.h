@@ -168,6 +168,14 @@ void al_clear_target_hosts(void);
 // Container catalog & file system (Application Containers + App Groups)
 // ---------------------------------------------------------------------------
 
+// Fetch the real app icon (PNG) from SpringBoard and write it to a local file.
+int32_t al_app_icon(const char *pairing_path,
+                    const char *bundle_id,
+                    const char *dest_local_path,
+                    ALLogCallback log_cb,
+                    void *ctx,
+                    char **out_error);
+
 // Enumerate installed apps + their Data containers + App Group containers.
 int32_t al_container_catalog(const char *pairing_path,
                             ALLogCallback log_cb,

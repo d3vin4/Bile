@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct BrowserView: View {
@@ -12,6 +13,8 @@ struct BrowserView: View {
     @State private var showRename = false
     @State private var deleteTarget: FileEntry? = nil
     @State private var showDeleteConfirm = false
+    @State private var replaceTarget: FileEntry? = nil
+    @State private var showReplace = false
 
     var body: some View {
         NavigationView {
@@ -30,6 +33,12 @@ struct BrowserView: View {
             .sheet(isPresented: $state.showPreview) { previewSheet }
             .fileImporter(isPresented: $showImporter, allowedContentTypes: [.data]) { result in
                 if case .success(let url) = result { state.importFile(from: url) }
+            }
+            .fileImporter(isPresented: $showReplace, allowedContentTypes: [.data]) { result in
+                if case .success(let url) = result, let target = replaceTarget {
+                    state.replaceFile(target, with: url)
+                }
+                replaceTarget = nil
             }
             .confirmationDialog(
                 deleteTarget.map { "Delete “\($0.name)”?" } ?? "Delete?",
@@ -194,6 +203,55 @@ struct BrowserView: View {
                     state.shareFile(entry)
                 } label: { Label(lang("save"), systemImage: "square.and.arrow.up") }
                 .tint(.green)
+            }
+        }
+        .contextMenu {
+            if !entry.isDir {
+                Button { state.preview(entry) } label: {
+                    Label(lang("preview"), systemImage: "doc.text.magnifyingglass")
+                }
+                Button { state.shareFile(entry) } label: {
+                    Label(lang("save"), systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    replaceTarget = entry
+                    showReplace = true
+                } label: {
+                    Label(lang("replace"), systemImage: "arrow.triangle.2.circlepath")
+                }
+            } else {
+                Button { state.navigate(into: entry.name) } label: {
+                    Label(lang("open"), systemImage: "folder")
+                }
+                Button { state.exportFolderZip(entry) } label: {
+                    Label(lang("export.as.zip"), systemImage: "square.and.arrow.down.on.square")
+                }
+            }
+
+            Divider()
+
+            Button {
+                renameTarget = entry
+                renameName = entry.name
+                showRename = true
+            } label: {
+                Label(lang("rename.or.move"), systemImage: "pencil")
+            }
+
+            Button {
+                UIPasteboard.general.string = state.absolutePath(for: entry)
+                state.logLine("Copied path: \(state.absolutePath(for: entry))")
+            } label: {
+                Label(lang("copy.path"), systemImage: "doc.on.doc")
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                deleteTarget = entry
+                showDeleteConfirm = true
+            } label: {
+                Label(lang("delete"), systemImage: "trash")
             }
         }
     }

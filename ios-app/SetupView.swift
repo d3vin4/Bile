@@ -173,6 +173,12 @@ struct SetupView: View {
                         .foregroundStyle(result.ok ? Color.green : Color.secondary)
                 }
             }
+            let hint = TunnelProbe.hint(for: state.tunnelResults)
+            if !hint.isEmpty {
+                Text(hint)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
         } header: {
             Text(lang("tunnel"))
         } footer: {

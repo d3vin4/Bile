@@ -131,7 +131,7 @@ struct AppRow: View {
     let app: AppEntry
     var body: some View {
         HStack(spacing: 10) {
-            AppAvatar(name: app.name)
+            AppIconView(bundleId: app.bundleId, name: app.name, size: 40)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(app.name).font(.body).lineLimit(1)
@@ -176,8 +176,16 @@ struct GroupRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .foregroundStyle(Color.accentColor)
+                // Icons of the apps that own the group.
+                HStack(spacing: -8) {
+                    ForEach(Array(group.owners.prefix(3)), id: \.self) { owner in
+                        AppIconView(
+                            bundleId: owner,
+                            name: state.apps.first(where: { $0.bundleId == owner })?.name ?? owner,
+                            size: 28
+                        )
+                    }
+                }
                 Text(shortGroupName)
                     .font(.body.bold())
                     .lineLimit(1)
@@ -235,7 +243,7 @@ struct AppDetailView: View {
         Form {
             Section(lang("apps")) {
                 HStack(spacing: 10) {
-                    AppAvatar(name: app.name)
+                    AppIconView(bundleId: app.bundleId, name: app.name, size: 52)
                     VStack(alignment: .leading) {
                         Text(app.name).font(.headline)
                         Text(app.bundleId).font(.caption2.monospaced())

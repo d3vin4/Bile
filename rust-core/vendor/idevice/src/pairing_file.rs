@@ -116,7 +116,7 @@ impl PairingFile {
         let r = match ::plist::from_bytes::<RawPairingFile>(bytes) {
             Ok(r) => r,
             Err(e) => {
-                warn!("Unable to convert bytes to raw pairing file: {e:?}");
+                tracing::debug!("not a lockdown pairing file: {e:?}");
                 return Err(crate::IdeviceError::UnexpectedResponse(
                     "failed to parse raw pairing file from bytes".into(),
                 ));

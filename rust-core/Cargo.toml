@@ -25,6 +25,7 @@ idevice = { git = "https://github.com/jkcoxson/idevice.git", rev = "7bd551c16c6d
   "syslog_relay",
   "installation_proxy",
   "house_arrest",
+  "springboardservices",
 ] }
 
 # idevice-ffi for tunnel_create_rppairing + AFC C FFI (re-exports its #[no_mangle] symbols).

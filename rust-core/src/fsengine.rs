@@ -184,51 +184,91 @@ async fn remove_one(afc: &mut AfcClient, path: &str) -> Result<(), String> {
 // Media (Books sync) state — snapshot & restore around every AirTraffic move
 // ---------------------------------------------------------------------------
 
+/// Files the Books sync daemon may touch while our manifest is in place.
+/// They are snapshotted before every AirTraffic move and written back
+/// afterwards, so the device is left exactly as it was found.
+const BOOKS_STATE_FILES: [&str; 6] = [
+    "Books/Sync/Books.plist",
+    "Books/Sync/Upload.plist",
+    "Books/Books.plist",
+    "Books/Sync/Database/OutstandingAssets_4.sqlite",
+    "Books/Sync/Database/OutstandingAssets_4.sqlite-wal",
+    "Books/Sync/Database/OutstandingAssets_4.sqlite-shm",
+];
+
+/// Beyond this size a state file is not worth holding in memory.
+const MAX_STATE_FILE: usize = 8 * 1024 * 1024;
+
 struct MediaState {
-    books_plist: Option<Vec<u8>>,
-    books_dir_existed: bool,
-    sync_dir_existed: bool,
+    files: Vec<(String, Option<Vec<u8>>)>,
+    dirs: Vec<(String, bool)>,
 }
 
 async fn snapshot_media_state(afc: &mut AfcClient) -> MediaState {
-    let books_plist = match afc
-        .open("Books/Sync/Books.plist", AfcFopenMode::RdOnly)
-        .await
-    {
-        Ok(mut fd) => {
-            let data = fd.read_entire().await.ok();
-            let _ = fd.close().await;
-            data
-        }
-        Err(_) => None,
-    };
-    MediaState {
-        books_plist,
-        books_dir_existed: afc.get_file_info("Books").await.is_ok(),
-        sync_dir_existed: afc.get_file_info("Books/Sync").await.is_ok(),
+    let mut files: Vec<(String, Option<Vec<u8>>)> = Vec::new();
+    for path in BOOKS_STATE_FILES {
+        let size = afc.get_file_info(path).await.map(|i| i.size).unwrap_or(0);
+        let data = match afc.open(path, AfcFopenMode::RdOnly).await {
+            Ok(mut fd) => {
+                let data = if size <= MAX_STATE_FILE {
+                    fd.read_entire().await.ok()
+                } else {
+                    None
+                };
+                let _ = fd.close().await;
+                data
+            }
+            Err(_) => None,
+        };
+        files.push((path.to_string(), data));
     }
+    let dirs = vec![
+        (
+            "Books".to_string(),
+            afc.get_file_info("Books").await.is_ok(),
+        ),
+        (
+            "Books/Sync".to_string(),
+            afc.get_file_info("Books/Sync").await.is_ok(),
+        ),
+    ];
+    MediaState { files, dirs }
+}
+
+fn dir_existed(state: &MediaState, path: &str) -> bool {
+    state
+        .dirs
+        .iter()
+        .find(|(p, _)| p == path)
+        .map(|(_, e)| *e)
+        .unwrap_or(false)
 }
 
 async fn restore_media_state(afc: &mut AfcClient, state: &MediaState) {
-    match &state.books_plist {
-        Some(original) => {
-            if let Ok(mut fd) = afc
-                .open("Books/Sync/Books.plist", AfcFopenMode::WrOnly)
-                .await
-            {
-                let _ = fd.write_entire(original).await;
-                let _ = fd.close().await;
+    // Put every state file back exactly as it was; remove the ones we created.
+    for (path, original) in &state.files {
+        match original {
+            Some(bytes) => {
+                if let Ok(mut fd) = afc.open(path, AfcFopenMode::WrOnly).await {
+                    let _ = fd.write_entire(bytes).await;
+                    let _ = fd.close().await;
+                }
+            }
+            None => {
+                let _ = afc.remove(path).await;
             }
         }
-        None => {
-            let _ = afc.remove("Books/Sync/Books.plist").await;
+    }
+    // State files we deliberately do not hold (> 8 MB) are left alone entirely.
+    if let Some((_, existed)) = state.dirs.iter().find(|(p, _)| p == "Books/Sync") {
+        if !existed {
+            let _ = afc.remove("Books/Sync").await;
         }
     }
-    if !state.sync_dir_existed {
-        let _ = afc.remove("Books/Sync").await;
-    }
-    if !state.books_dir_existed {
-        let _ = afc.remove("Books").await;
+    if let Some((_, existed)) = state.dirs.iter().find(|(p, _)| p == "Books") {
+        if !existed {
+            let _ = afc.remove("Books").await;
+        }
     }
 }
 
@@ -646,10 +686,10 @@ pub(crate) async fn move_path(
     // 2. Airlock + Books manifest.
     let _ = afc.mk_dir("Airlock").await;
     let _ = afc.mk_dir("Airlock/Book").await;
-    if !state.books_dir_existed {
+    if !dir_existed(&state, "Books") {
         let _ = afc.mk_dir("Books").await;
     }
-    if !state.sync_dir_existed {
+    if !dir_existed(&state, "Books/Sync") {
         let _ = afc.mk_dir("Books/Sync").await;
     }
     let books_write: Result<(), String> = async {
@@ -697,6 +737,10 @@ pub(crate) async fn move_path(
     // 4. Always restore Books state and clean our staging directory.
     restore_media_state(afc, &state).await;
     let _ = remove_tree_safe(afc, &stage).await;
+
+    if result.is_ok() {
+        logger.log("AirTraffic move done (Books sync state snapshotted and restored)".to_string());
+    }
 
     // Surface a failed cleanup instead of leaving silent junk in Media.
     if afc.get_file_info(&stage).await.is_ok() {
@@ -802,10 +846,10 @@ async fn create_bridge_atc(
 
     let _ = afc.mk_dir("Airlock").await;
     let _ = afc.mk_dir("Airlock/Book").await;
-    if !state.books_dir_existed {
+    if !dir_existed(&state, "Books") {
         let _ = afc.mk_dir("Books").await;
     }
-    if !state.sync_dir_existed {
+    if !dir_existed(&state, "Books/Sync") {
         let _ = afc.mk_dir("Books/Sync").await;
     }
     {
@@ -884,6 +928,32 @@ async fn bridge_usable(afc: &mut AfcClient, bridge: &str, container_path: &str) 
         bridge_matches(afc, bridge, container_path).await,
         Ok(Some(true)) | Ok(None)
     )
+}
+
+/// Try every spelling AFC may accept for a directory. Directory enumeration
+/// through a Media symlink is not always accepted for the bare path, so the
+/// trailing-slash and `/.` forms are attempted too. This keeps browsing on the
+/// direct path (no relocation of live app data) whenever it is possible at all.
+async fn list_dir_variants(afc: &mut AfcClient, full_path: &str) -> Option<Vec<String>> {
+    let trimmed = if full_path.is_empty() {
+        "/".to_string()
+    } else {
+        full_path.trim_end_matches('/').to_string()
+    };
+    let mut candidates = vec![
+        trimmed.clone(),
+        format!("{trimmed}/"),
+        format!("{trimmed}/."),
+    ];
+    if trimmed == "/" {
+        candidates = vec!["/".to_string(), ".".to_string(), "".to_string()];
+    }
+    for candidate in candidates {
+        if let Ok(names) = afc.list_dir(&candidate).await {
+            return Some(names);
+        }
+    }
+    None
 }
 
 /// Probe what the Media bridge actually permits.
@@ -1358,21 +1428,22 @@ async fn fs_list_async(
 
     let mut entries: Vec<serde_json::Value> = Vec::new();
 
+    // Always attempt the direct listing first — even when the earlier probe said
+    // "no", because AFC accepts some path spellings and rejects others. Only a
+    // real failure falls back to relocating anything.
+    let direct_path = engine.path(&rel_path);
+    let direct = list_dir_variants(&mut engine.afc, &direct_path).await;
+
     // Base path the entries are stat'ed through. In move mode this is the Media
     // staging path, because the bridge denies traversal.
-    let (names, base) = if engine.direct_list {
-        let afc_path = engine.path(&rel_path);
-        let names = engine
-            .afc
-            .list_dir(&afc_path)
-            .await
-            .map_err(|e| format!("{e:?}"))?;
-        (names, afc_path)
+    let (names, base) = if let Some(names) = direct {
+        (names, engine.path(&rel_path))
     } else {
         if !risky_moves_allowed() {
             return Err(
-                "This container can only be read in AirLift move mode, which temporarily \
-                 relocates a directory. Enable \"Allow risky moves\" in Setup to use it."
+                "Folder listing is blocked for this container. Turn on \"Allow risky moves\" in \
+                 Setup to try the AirLift relocation fallback — reading individual files and \
+                 exporting the container as a ZIP still work without it."
                     .to_string(),
             );
         }
@@ -1384,7 +1455,12 @@ async fn fs_list_async(
 
         move_path(&mut tunnel, &mut engine.afc, &abs, &staging, logger)
             .await
-            .map_err(|e| format!("could not relocate the directory for listing: {e}"))?;
+            .map_err(|e| {
+                format!(
+                    "This container refuses both direct listing and the relocation fallback ({e}).\n\
+                     Nothing was changed — the folder is exactly where it was.                      Use “Export as ZIP” or open individual files instead."
+                )
+            })?;
 
         let listed = engine.afc.list_dir(&staging).await;
         let names = match listed {
@@ -1649,17 +1725,37 @@ async fn fs_read_async(
         let _ = std::fs::create_dir_all(parent);
     }
 
-    if engine.direct_read {
-        let afc_path = engine.path(&rel_path);
-        let mut fd = engine
-            .afc
-            .open(&afc_path, AfcFopenMode::RdOnly)
-            .await
-            .map_err(|e| format!("{e:?}"))?;
+    // Always try the direct read first: if AFC serves the file through the
+    // bridge, nothing in the container is touched at all.
+    let afc_path = engine.path(&rel_path);
+    if let Ok(mut fd) = engine.afc.open(&afc_path, AfcFopenMode::RdOnly).await {
         let written = stream_afc_to_local(&mut fd, &dest_local_path).await;
         let _ = fd.close().await;
-        written?;
-        return Ok(());
+        match written {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                // The open worked but the transfer failed — retry once directly
+                // before falling back to a relocation.
+                if let Ok(mut fd2) = engine.afc.open(&afc_path, AfcFopenMode::RdOnly).await {
+                    let retry = stream_afc_to_local(&mut fd2, &dest_local_path).await;
+                    let _ = fd2.close().await;
+                    if retry.is_ok() {
+                        return Ok(());
+                    }
+                }
+                logger.log(format!("direct read failed ({e}); falling back"));
+            }
+        }
+    } else {
+        logger.log("direct read unavailable through the bridge");
+    }
+
+    if !risky_moves_allowed() {
+        return Err(
+            "This file can only be read by relocating it, which needs \"Allow risky moves\" in \
+             Setup. Turn it on, or export the whole container as a ZIP instead."
+                .to_string(),
+        );
     }
 
     // Move mode: relocate the file out, copy it, then put it back — verified.

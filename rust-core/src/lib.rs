@@ -15,6 +15,7 @@ pub mod export;
 pub mod ffi_util;
 pub mod fsengine;
 pub mod grappa;
+pub mod icons;
 pub mod logging;
 pub mod pairing;
 
@@ -303,6 +304,36 @@ pub unsafe extern "C" fn al_fs_remove(
         Err(e) => {
             if !out_error.is_null() {
                 *out_error = ffi_util::cstr(format!("Rust panic in al_fs_remove: {e:?}"));
+            }
+            1
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn al_app_icon(
+    pairing_path: *const c_char,
+    bundle_id: *const c_char,
+    dest_local_path: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        icons::app_icon(
+            pairing_path,
+            bundle_id,
+            dest_local_path,
+            log_cb,
+            ctx,
+            out_error,
+        )
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(e) => {
+            if !out_error.is_null() {
+                *out_error = ffi_util::cstr(format!("Rust panic in al_app_icon: {e:?}"));
             }
             1
         }

@@ -79,6 +79,23 @@ enum RustBridge {
         free(outErr)
     }
 
+    static func appIcon(pairingPath: String, bundleId: String, destLocalPath: String) throws {
+        var outErr: UnsafeMutablePointer<CChar>?
+        let rc = withCString(pairingPath) { pp in
+            withCString(bundleId) { bp in
+                withCString(destLocalPath) { dp in
+                    al_app_icon(pp, bp, dp, nil, nil, &outErr)
+                }
+            }
+        }
+        if rc != 0 {
+            let msg = outErr.map { String(cString: $0) } ?? "icon fetch failed"
+            free(outErr)
+            throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        free(outErr)
+    }
+
     static func cleanupLeftovers(pairingPath: String) throws -> [String: Any] {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?

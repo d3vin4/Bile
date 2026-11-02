@@ -338,14 +338,18 @@ final class AppState: ObservableObject {
 
     /// Safe bulk export: the Rust core walks the container read-only and writes
     /// a ZIP locally; symlinks are recorded, never followed.
-    func exportContainerAsZip() {
+    func exportFolderZip(_ entry: FileEntry) {
+        exportContainerAsZip(relPathOverride: relPath(for: entry), nameOverride: entry.name)
+    }
+
+    func exportContainerAsZip(relPathOverride: String? = nil, nameOverride: String? = nil) {
         guard let c = selectedContainer else { return }
         isExporting = true
         let stamp = ISO8601DateFormatter().string(from: Date()).prefix(10)
-        let safeName = c.name.replacingOccurrences(of: "/", with: "-")
+        let baseName = (nameOverride ?? c.name).replacingOccurrences(of: "/", with: "-")
         let zip = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(safeName)-\(stamp).zip")
-        let rel = currentRelPath
+            .appendingPathComponent("\(baseName)-\(stamp).zip")
+        let rel = relPathOverride ?? currentRelPath
         logLine("Exporting \(c.name)\(rel.isEmpty ? "" : "/" + rel) to ZIP…")
         Task {
             do {
@@ -440,6 +444,37 @@ final class AppState: ObservableObject {
                 await MainActor.run { logLine("Rename failed: \(error.localizedDescription)") }
             }
         }
+    }
+
+    /// Overwrites an existing file with the contents of `url` (same name, same
+    /// folder). The Rust core backs the original up first when it has to
+    /// relocate, and restores it if the write cannot complete.
+    func replaceFile(_ entry: FileEntry, with url: URL) {
+        guard let c = selectedContainer else { return }
+        let rel = relPath(for: entry)
+        let local = FileManager.default.temporaryDirectory.appendingPathComponent(entry.name).path
+        logLine("Replacing \(rel)…")
+        Task {
+            let secured = url.startAccessingSecurityScopedResource()
+            defer { if secured { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                try data.write(to: URL(fileURLWithPath: local))
+                try RustBridge.write(pairingPath: pairingPath, bundleId: c.bundleId, containerPath: c.path, relPath: rel, bridge: bridge, srcLocalPath: local)
+                await MainActor.run {
+                    logLine("Replaced \(entry.name) ✅")
+                    loadFiles()
+                }
+            } catch {
+                await MainActor.run { logLine("Replace failed: \(error.localizedDescription)") }
+            }
+        }
+    }
+
+    /// Container-absolute path of an entry, for the clipboard.
+    func absolutePath(for entry: FileEntry) -> String {
+        guard let c = selectedContainer else { return entry.name }
+        return c.path + "/" + relPath(for: entry)
     }
 
     func importFile(from url: URL) {

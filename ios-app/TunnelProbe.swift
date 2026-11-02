@@ -35,7 +35,23 @@ enum TunnelProbe {
         for ip in defaultHosts where !hosts.contains(ip) {
             hosts.append(ip)
         }
-        return hosts
+        // Also probe this device's own addresses: when the VPN is up its tunnel
+        // address (or the Wi-Fi address) is often the one that answers.
+        for ip in NetworkStatus.tunnelAddresses() where !hosts.contains(ip) {
+            hosts.append(ip)
+        }
+        for ip in NetworkStatus.tunnelHostCandidates() where !hosts.contains(ip) {
+            hosts.append(ip)
+        }
+        return Array(hosts.prefix(6))
+    }
+
+    /// Extra guidance when nothing answers.
+    static func hint(for results: [Result]) -> String {
+        if results.contains(where: { $0.ok }) { return "" }
+        return "No host answered. Check that the loopback VPN app (LocalDevVPN / "
+            + "StosVPN / SideStore WireGuard) is running, that Readipa has Local "
+            + "Network permission in Settings › Readipa, and that Wi-Fi is on."
     }
 
     static func probe(hosts: [String], timeout: TimeInterval = 1.5) -> [Result] {
