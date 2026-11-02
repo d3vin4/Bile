@@ -11,10 +11,9 @@ use packet::{AfcPacket, AfcPacketHeader};
 use tracing::warn;
 
 use crate::{
-    Idevice, IdeviceError, IdeviceService,
     afc::file::{FileDescriptor, OwnedFileDescriptor},
     lockdown::LockdownClient,
-    obf,
+    obf, Idevice, IdeviceError, IdeviceService,
 };
 
 pub mod errors;
@@ -251,7 +250,12 @@ impl AfcClient {
 
         let st_nlink = kvs.remove("st_nlink").ok_or(AfcError::MissingAttribute)?;
         let st_ifmt = kvs.remove("st_ifmt").ok_or(AfcError::MissingAttribute)?;
-        let st_link_target = kvs.remove("st_link_target");
+        // Some iOS builds report the symlink destination as "LinkTarget"
+        // instead of "st_link_target" (and vice versa). Accept both.
+        let st_link_target = kvs
+            .remove("st_link_target")
+            .or_else(|| kvs.remove("LinkTarget"))
+            .or_else(|| kvs.remove("link_target"));
 
         if !kvs.is_empty() {
             warn!("File info kvs not empty: {kvs:?}");

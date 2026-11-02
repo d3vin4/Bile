@@ -36,21 +36,33 @@ struct RootView: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        let tabs = TabView {
+        let tabs = TabView(selection: $state.selectedTab) {
             SetupView()
                 .tabItem { Label("Setup", systemImage: "gear") }
+                .tag(AppTab.setup)
             AppsView()
                 .tabItem { Label("Apps", systemImage: "app.badge") }
+                .tag(AppTab.apps)
             BrowserView()
                 .tabItem { Label("Files", systemImage: "folder") }
+                .tag(AppTab.files)
             LogView()
                 .tabItem { Label("Logs", systemImage: "text.alignleft") }
+                .tag(AppTab.logs)
+        }
+
+        // One share sheet for the whole app: presenting it per-tab makes SwiftUI
+        // complain when two tabs share the same binding.
+        let withShare = tabs.sheet(isPresented: $state.showShareSheet) {
+            if let url = state.exportedFileURL {
+                ShareSheet(items: [url])
+            }
         }
 
         if #available(iOS 26.0, *) {
-            tabs.tabBarMinimizeBehavior(.onScrollDown)
+            withShare.tabBarMinimizeBehavior(.onScrollDown)
         } else {
-            tabs
+            withShare
         }
     }
 }

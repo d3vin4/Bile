@@ -5,11 +5,11 @@ use std::{io::SeekFrom, marker::PhantomPinned, pin::Pin};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite};
 
 use crate::{
-    IdeviceError,
     afc::{
-        AfcClient,
         inner_file::{InnerFileDescriptor, OwnedInnerFileDescriptor},
+        AfcClient,
     },
+    IdeviceError,
 };
 
 /// Handle for an open file on the device.

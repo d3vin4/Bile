@@ -4,9 +4,13 @@ struct SetupView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var pairing: PairingController
     @State private var isPairing = false
-    @State private var recoverTarget: FileEntry? = nil
+    @State private var recoverTarget: LeftoverEntry? = nil
     @State private var recoverPath = ""
     @State private var showRecover = false
+    @State private var deleteTarget: LeftoverEntry? = nil
+    @State private var showDeleteLeftover = false
+    @State private var showRiskyWarning = false
+    @State private var showCleanupConfirm = false
 
     var body: some View {
         NavigationView {
@@ -16,14 +20,52 @@ struct SetupView: View {
                 catalogSection
                 riskyMovesSection
                 recoverySection
-                aboutSection
             }
             .navigationTitle("Readipa Setup")
             .sheet(isPresented: $showRecover) { recoverSheet }
+            .alert("Enable risky moves?", isPresented: $showRiskyWarning) {
+                Button("Cancel", role: .cancel) { state.allowRiskyMoves = false }
+                Button("I understand", role: .destructive) { state.allowRiskyMoves = true }
+            } message: {
+                Text("Containers that block direct access are only readable by temporarily moving a "
+                     + "folder out of the app into /var/mobile/Media and back.\n\n"
+                     + "Readipa verifies every move and always puts the folder back, and if anything "
+                     + "goes wrong it tells you exactly where the data is kept — but for those seconds "
+                     + "the app really is missing that folder. Only enable this for App Groups you "
+                     + "need to inspect.")
+            }
+            .confirmationDialog(
+                "Delete “\(deleteTarget?.name ?? "")”?",
+                isPresented: $showDeleteLeftover,
+                titleVisibility: .visible
+            ) {
+                Button("Delete permanently", role: .destructive) {
+                    if let t = deleteTarget { state.deleteLeftover(t) }
+                    deleteTarget = nil
+                }
+                Button("Cancel", role: .cancel) { deleteTarget = nil }
+            } message: {
+                Text(deleteTarget?.safeToRemove == true
+                     ? "This leftover holds no data, so nothing is lost."
+                     : "This leftover CONTAINS DATA. Deleting it cannot be undone.")
+            }
+            .confirmationDialog(
+                "Remove empty leftovers?",
+                isPresented: $showCleanupConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Remove \(safeLeftoverCount) empty items", role: .destructive) {
+                    state.cleanupLeftovers()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Only bridge links and empty folders are removed. Anything that still contains "
+                     + "files is kept and stays listed.")
+            }
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Pairing
 
     private var pairingSection: some View {
         Section {
@@ -36,7 +78,7 @@ struct SetupView: View {
             }
             if state.hasPairingFile {
                 Text(PairingStore.fileName).font(.caption).foregroundStyle(.secondary)
-                Text("Stored in Documents and the Keychain — relaunching or reinstalling keeps it.")
+                Text("Kept in Documents and the Keychain — relaunching keeps it.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -94,6 +136,8 @@ struct SetupView: View {
         }
     }
 
+    // MARK: - Tunnel
+
     private var tunnelSection: some View {
         Section {
             TextField("Device IP", text: $state.deviceIP)
@@ -102,7 +146,7 @@ struct SetupView: View {
 
             let summary = NetworkStatus.summarize(deviceIP: state.deviceIP)
             HStack(spacing: 8) {
-                StatusChip(title: "tunnel iface", value: summary.vpn ? "up" : "down", ok: summary.vpn)
+                StatusChip(title: "tunnel", value: summary.vpn ? "up" : "down", ok: summary.vpn)
                 StatusChip(title: "wi-fi", value: summary.wifi ? "up" : "down", ok: summary.wifi)
             }
             .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
@@ -120,18 +164,16 @@ struct SetupView: View {
                         .foregroundStyle(result.ok ? .green : .secondary)
                 }
             }
-
-            Text(summary.detail)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         } header: {
             Text("Tunnel")
         } footer: {
-            Text("The AirLift pipeline needs a loopback VPN (LocalDevVPN, StosVPN, SideStore WireGuard). "
-                 + "Test tunnel dials the RSD port 49152 and lockdownd 62078 on every candidate address.")
+            Text("Checks RSD (49152) and lockdownd (62078) on 10.7.0.1 and 192.168.1.2. "
+                 + "Start the loopback VPN (LocalDevVPN / StosVPN) before pairing.")
             .font(.caption2)
         }
     }
+
+    // MARK: - Catalog
 
     private var catalogSection: some View {
         Section {
@@ -146,60 +188,111 @@ struct SetupView: View {
         }
     }
 
+    // MARK: - Risky moves
+
     private var riskyMovesSection: some View {
         Section {
-            Toggle("Allow risky moves", isOn: $state.allowRiskyMoves)
-            Text("Containers that block direct access can only be listed or exported by temporarily "
-                 + "relocating a folder to Media. Every relocation is verified and always moved back, "
-                 + "but it touches live app data — keep this off unless you need App Group access.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            Toggle("Allow risky moves", isOn: Binding(
+                get: { state.allowRiskyMoves },
+                set: { newValue in
+                    if newValue {
+                        showRiskyWarning = true
+                    } else {
+                        state.allowRiskyMoves = false
+                    }
+                }
+            ))
+            if state.allowRiskyMoves {
+                Label("Risky moves are ON — folders may be relocated for a few seconds.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
         } header: {
             Text("AirLift move mode")
+        } footer: {
+            Text("Needed only for containers that refuse both listing and reading. "
+                 + "Read-only access never relocates anything.")
+            .font(.caption2)
         }
+    }
+
+    // MARK: - Recovery
+
+    private var safeLeftoverCount: Int {
+        state.leftovers.filter(\.safeToRemove).count
+    }
+
+    private var leftoverGroups: [(kind: String, items: [LeftoverEntry])] {
+        Dictionary(grouping: state.leftovers, by: \.kind)
+            .map { (kind: $0.key, items: $0.value.sorted { $0.name < $1.name }) }
+            .sorted { $0.kind < $1.kind }
     }
 
     private var recoverySection: some View {
         Section {
-            Button("Scan for leftover files") { state.scanLeftovers() }
-                .disabled(!state.hasPairingFile)
+            HStack(spacing: 8) {
+                Button("Scan") { state.scanLeftovers() }
+                    .disabled(!state.hasPairingFile)
+                Spacer()
+                if safeLeftoverCount > 0 {
+                    Button("Clean empty (\(safeLeftoverCount))") { showCleanupConfirm = true }
+                        .foregroundStyle(.orange)
+                }
+            }
+
             if state.leftovers.isEmpty {
-                Text("No leftovers").font(.caption).foregroundStyle(.secondary)
-            } else {
-                ForEach(state.leftovers) { item in
-                    Button {
-                        recoverTarget = item
-                        recoverPath = ""
-                        showRecover = true
-                    } label: {
-                        VStack(alignment: .leading) {
-                            Text(item.name).font(.caption.monospaced())
-                            Text("\(FileEntry.prettySize(item.size)) · tap to restore")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                Text("Nothing to recover").font(.caption).foregroundStyle(.secondary)
+            }
+
+            ForEach(leftoverGroups, id: \.kind) { group in
+                DisclosureGroup {
+                    ForEach(group.items) { item in
+                        HStack(spacing: 8) {
+                            Image(systemName: item.isLink ? "link" : (item.isDir ? "folder" : "doc"))
+                                .foregroundStyle(item.safeToRemove ? .secondary : .orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.name)
+                                    .font(.caption.monospaced())
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text("\(item.explain) · \(FileEntry.prettySize(item.size))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Menu {
+                                Button("Restore into open container…") {
+                                    recoverTarget = item
+                                    recoverPath = ""
+                                    showRecover = true
+                                }
+                                Button("Delete…", role: .destructive) {
+                                    deleteTarget = item
+                                    showDeleteLeftover = true
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                            }
+                            .buttonStyle(.borderless)
                         }
+                    }
+                } label: {
+                    HStack {
+                        Text(group.kind)
+                        Spacer()
+                        Text("\(group.items.count)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            Text("Files Readipa moved out of a container but could not move back stay in "
-                 + "/var/mobile/Media and are listed here. Nothing is ever deleted automatically.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         } header: {
             Text("Recovery")
-        }
-    }
-
-    private var aboutSection: some View {
-        Section {
-            HStack { Text("Scope"); Spacer(); Text("Data Containers + App Groups").font(.caption) }
-            HStack { Text("Engine"); Spacer(); Text(state.bridgeMode.isEmpty ? "—" : state.bridgeMode).font(.caption) }
-            HStack { Text("Build"); Spacer(); Text(appVersion).font(.caption) }
-        } header: {
-            Text("About")
         } footer: {
-            Text("Readipa only operates inside /var/mobile/Containers/Data/Application and "
-                 + "/var/mobile/Containers/Shared/AppGroup. Build adopts Liquid Glass on iOS 26+.")
+            Text("Temporary items Readipa left in /var/mobile/Media — usually bridge links and empty "
+                 + "staging folders, which hold no data. “Clean empty” removes only those. "
+                 + "Anything containing files stays until you delete it yourself.")
             .font(.caption2)
         }
     }
@@ -209,6 +302,9 @@ struct SetupView: View {
             Form {
                 Section("Leftover") {
                     Text(recoverTarget?.name ?? "").font(.caption.monospaced())
+                    Text(recoverTarget?.explain ?? "")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Restore into") {
                     if let c = state.selectedContainer {
@@ -235,11 +331,5 @@ struct SetupView: View {
             }
             .navigationTitle("Restore leftover")
         }
-    }
-
-    private var appVersion: String {
-        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "\(v) (\(b))"
     }
 }

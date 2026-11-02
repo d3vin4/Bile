@@ -45,7 +45,9 @@ final class AppState: ObservableObject {
     @Published var showPreview = false
     @Published var isExporting = false
     @Published var bridgeRequiresRiskyMoves = false
-    @Published var leftovers: [FileEntry] = []
+    @Published var leftovers: [LeftoverEntry] = []
+    @Published var selectedTab: AppTab = .setup
+    @Published var pathHistory: [String] = []
 
     @Published var allowRiskyMoves: Bool = UserDefaults.standard.bool(forKey: "readipa.allowRiskyMoves") {
         didSet {
@@ -171,6 +173,8 @@ final class AppState: ObservableObject {
     // MARK: - Container
 
     func openContainer(path: String, bundleId: String, name: String) {
+        selectedTab = .files
+        pathHistory = []
         selectedContainer = (path, bundleId, name)
         bridge = ""
         bridgeMode = ""
@@ -244,15 +248,38 @@ final class AppState: ObservableObject {
     }
 
     func navigate(into dir: String) {
+        pathHistory.append(currentRelPath)
         if currentRelPath.isEmpty { currentRelPath = dir } else { currentRelPath += "/" + dir }
         loadFiles()
     }
 
-    func navigateUp() {
-        if currentRelPath.isEmpty { return }
-        var parts = currentRelPath.split(separator: "/").map(String.init)
-        parts.removeLast()
-        currentRelPath = parts.joined(separator: "/")
+    var canGoBack: Bool { !pathHistory.isEmpty || !currentRelPath.isEmpty }
+
+    /// Goes back to the previously visited folder (the "undo" for navigation).
+    func navigateBack() {
+        if !pathHistory.isEmpty {
+            currentRelPath = pathHistory.removeLast()
+        } else if !currentRelPath.isEmpty {
+            var parts = currentRelPath.split(separator: "/").map(String.init)
+            parts.removeLast()
+            currentRelPath = parts.joined(separator: "/")
+        } else {
+            return
+        }
+        loadFiles()
+    }
+
+    func navigateHome() {
+        guard !currentRelPath.isEmpty else { return }
+        pathHistory.append(currentRelPath)
+        currentRelPath = ""
+        loadFiles()
+    }
+
+    func jump(to path: String) {
+        guard path != currentRelPath else { return }
+        pathHistory.append(currentRelPath)
+        currentRelPath = path
         loadFiles()
     }
 
@@ -437,14 +464,17 @@ final class AppState: ObservableObject {
         Task {
             do {
                 let list = try RustBridge.mediaLeftovers(pairingPath: pairingPath)
-                let entries = list.map { d in
-                    FileEntry(
-                        id: (d["name"] as? String) ?? UUID().uuidString,
-                        name: (d["name"] as? String) ?? "",
+                let entries = list.map { d -> LeftoverEntry in
+                    let name = (d["name"] as? String) ?? ""
+                    return LeftoverEntry(
+                        id: name,
+                        name: name,
                         isDir: (d["isDir"] as? Bool) ?? false,
                         isLink: (d["isLink"] as? Bool) ?? false,
                         size: (d["size"] as? Int) ?? 0,
-                        modified: (d["modified"] as? String) ?? ""
+                        modified: (d["modified"] as? String) ?? "",
+                        kind: (d["kind"] as? String) ?? "temporary item",
+                        safeToRemove: (d["safeToRemove"] as? Bool) ?? false
                     )
                 }
                 await MainActor.run { self.leftovers = entries }
@@ -454,8 +484,63 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Removes only leftovers that provably hold no data.
+    func cleanupLeftovers() {
+        guard hasPairingFile else { return }
+        Task {
+            do {
+                let json = try RustBridge.cleanupLeftovers(pairingPath: pairingPath)
+                let removed = (json["removed"] as? Int) ?? 0
+                let kept = (json["kept"] as? Int) ?? 0
+                await MainActor.run {
+                    logLine("Cleanup: removed \(removed) empty leftovers, kept \(kept) that contain data")
+                    scanLeftovers()
+                }
+            } catch {
+                await MainActor.run { logLine("Cleanup failed: \(error.localizedDescription)") }
+            }
+        }
+    }
+
+    func deleteLeftover(_ item: LeftoverEntry) {
+        Task {
+            do {
+                try RustBridge.deleteLeftover(pairingPath: pairingPath, name: item.name)
+                await MainActor.run {
+                    logLine("Deleted leftover \(item.name)")
+                    scanLeftovers()
+                }
+            } catch {
+                await MainActor.run { logLine("Delete failed: \(error.localizedDescription)") }
+            }
+        }
+    }
+
+    /// Writes the log to a text file and hands it to the share sheet.
+    func shareLogs() {
+        let header = """
+        Readipa log
+        date: \(Date())
+        pairing: \(hasPairingFile ? "present" : "missing")
+        engine: \(bridgeMode.isEmpty ? "-" : bridgeMode)
+        tunnel host: \(deviceIP)
+        risky moves: \(allowRiskyMoves)
+
+        """
+        let text = header + log.joined(separator: "\n")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("readipa-log-\(Int(Date().timeIntervalSince1970)).txt")
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            exportedFileURL = url
+            showShareSheet = true
+        } catch {
+            logLine("Could not write the log file: \(error.localizedDescription)")
+        }
+    }
+
     /// Restore a leftover into `<folder>/<original name>` of the open container.
-    func recoverLeftover(_ item: FileEntry, intoFolder folder: String) {
+    func recoverLeftover(_ item: LeftoverEntry, intoFolder folder: String) {
         guard let c = selectedContainer else {
             logLine("Open the destination container first, then pick where to restore it")
             return

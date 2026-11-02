@@ -285,6 +285,21 @@ int32_t al_media_leftovers(const char *pairing_path,
                            char **out_json,
                            char **out_error);
 
+// Remove every leftover that provably holds no data (symlinks, empty trees).
+// Returns JSON {removed, kept, keptNames}. Never deletes data.
+int32_t al_cleanup_leftovers(const char *pairing_path,
+                             ALLogCallback log_cb,
+                             void *ctx,
+                             char **out_json,
+                             char **out_error);
+
+// Explicitly delete one leftover by name (caller confirms first). Symlink-safe.
+int32_t al_delete_leftover(const char *pairing_path,
+                           const char *name,
+                           ALLogCallback log_cb,
+                           void *ctx,
+                           char **out_error);
+
 // Move a Media leftover back into a container. Used to repair a failed move.
 int32_t al_recover_leftover(const char *pairing_path,
                             const char *leftover_name,

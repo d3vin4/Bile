@@ -23,20 +23,19 @@ enum TunnelProbe {
     static let rsdPort: UInt16 = 49152
     static let lockdownPort: UInt16 = 62078
 
-    /// Candidate hosts: whatever the user typed, plus the interfaces plus the
-    /// well-known loopback-VPN gateways.
+    /// The two addresses that matter: LocalDevVPN (10.7.0.1) and the common
+    /// router/tunnel address (192.168.1.2). A host typed by the user is tried
+    /// first so a custom setup still works.
+    static let defaultHosts = ["10.7.0.1", "192.168.1.2"]
+
     static func candidates(userHost: String) -> [String] {
         var hosts: [String] = []
         let typed = NetworkStatus.host(userHost)
         if !typed.isEmpty { hosts.append(typed) }
-        for ip in NetworkStatus.tunnelHostCandidates() where !hosts.contains(ip) {
+        for ip in defaultHosts where !hosts.contains(ip) {
             hosts.append(ip)
         }
-        for fallback in ["10.7.0.1", "10.7.0.2", "10.7.0.3", "10.0.0.1", "172.16.0.1"]
-        where !hosts.contains(fallback) {
-            hosts.append(fallback)
-        }
-        return Array(hosts.prefix(8))
+        return hosts
     }
 
     static func probe(hosts: [String], timeout: TimeInterval = 1.5) -> [Result] {

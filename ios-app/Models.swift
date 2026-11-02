@@ -53,6 +53,28 @@ struct FileEntry: Identifiable, Hashable {
     }
 }
 
+/// A temporary item this app (or its ancestor code) left in /var/mobile/Media.
+struct LeftoverEntry: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let isDir: Bool
+    let isLink: Bool
+    let size: Int
+    let modified: String
+    let kind: String
+    let safeToRemove: Bool
+
+    var explain: String {
+        if isLink { return "bridge link — holds no data" }
+        if safeToRemove { return "\(kind) — empty" }
+        return "\(kind) — contains data"
+    }
+}
+
+enum AppTab: Int, Hashable {
+    case setup, apps, files, logs
+}
+
 enum SortOrder: String, CaseIterable, Identifiable {
     case nameAscending = "Name ↑"
     case nameDescending = "Name ↓"

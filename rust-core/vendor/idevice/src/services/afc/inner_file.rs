@@ -2,16 +2,16 @@
 
 use std::{io::SeekFrom, pin::Pin};
 
-use futures::{FutureExt, future::BoxFuture};
+use futures::{future::BoxFuture, FutureExt};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite};
 
 use crate::{
-    IdeviceError,
     afc::{
-        AfcClient, MAGIC,
         opcode::AfcOpcode,
         packet::{AfcPacket, AfcPacketHeader},
+        AfcClient, MAGIC,
     },
+    IdeviceError,
 };
 
 /// Maximum transfer size for file operations (1MB)

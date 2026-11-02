@@ -79,6 +79,40 @@ enum RustBridge {
         free(outErr)
     }
 
+    static func cleanupLeftovers(pairingPath: String) throws -> [String: Any] {
+        var outJson: UnsafeMutablePointer<CChar>?
+        var outErr: UnsafeMutablePointer<CChar>?
+        let rc = withCString(pairingPath) { pp in
+            al_cleanup_leftovers(pp, logCallback, nil, &outJson, &outErr)
+        }
+        defer { free(outJson); free(outErr) }
+        if rc != 0 {
+            let msg = outErr.map { String(cString: $0) } ?? "cleanup failed"
+            throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        guard let json = outJson.map({ String(cString: $0) }),
+              let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return obj
+    }
+
+    static func deleteLeftover(pairingPath: String, name: String) throws {
+        var outErr: UnsafeMutablePointer<CChar>?
+        let rc = withCString(pairingPath) { pp in
+            withCString(name) { np in
+                al_delete_leftover(pp, np, logCallback, nil, &outErr)
+            }
+        }
+        if rc != 0 {
+            let msg = outErr.map { String(cString: $0) } ?? "delete failed"
+            free(outErr)
+            throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        free(outErr)
+    }
+
     static func exportContainer(
         pairingPath: String,
         bundleId: String,

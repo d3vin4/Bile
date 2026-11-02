@@ -26,11 +26,6 @@ struct BrowserView: View {
             .toolbar { toolbar }
             .sheet(isPresented: $showNewFolder) { newFolderSheet }
             .sheet(isPresented: $showRename) { renameSheet }
-            .sheet(isPresented: $state.showShareSheet) {
-                if let url = state.exportedFileURL {
-                    ShareSheet(items: [url])
-                }
-            }
             .sheet(isPresented: $state.showPreview) { previewSheet }
             .fileImporter(isPresented: $showImporter, allowedContentTypes: [.data]) { result in
                 if case .success(let url) = result { state.importFile(from: url) }
@@ -51,6 +46,17 @@ struct BrowserView: View {
                      : "This file will be deleted.")
             }
         }
+    }
+
+    /// Each folder on the path, for the breadcrumb menu.
+    private var breadcrumbLevels: [(title: String, path: String)] {
+        var levels: [(title: String, path: String)] = []
+        var accumulated: [String] = []
+        for part in state.currentRelPath.split(separator: "/").map(String.init) {
+            accumulated.append(part)
+            levels.append((title: part, path: accumulated.joined(separator: "/")))
+        }
+        return levels
     }
 
     // MARK: - Pieces
@@ -195,7 +201,38 @@ struct BrowserView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .navigationBarLeading) {
             if state.selectedContainer != nil {
-                Button("Close") { state.closeContainer() }
+                HStack(spacing: 14) {
+                    Button {
+                        state.navigateBack()
+                    } label: {
+                        Image(systemName: "chevron.backward")
+                    }
+                    .disabled(!state.canGoBack)
+
+                    Button {
+                        state.navigateHome()
+                    } label: {
+                        Image(systemName: "house")
+                    }
+                    .disabled(state.currentRelPath.isEmpty)
+                }
+            }
+        }
+        ToolbarItem(placement: .principal) {
+            if state.selectedContainer != nil {
+                Menu {
+                    Button("Container root") { state.navigateHome() }
+                    ForEach(breadcrumbLevels, id: \.path) { level in
+                        Button(level.title) { state.jump(to: level.path) }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(state.breadcrumb())
+                            .font(.caption.monospaced())
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down").font(.caption2)
+                    }
+                }
             }
         }
         ToolbarItemGroup(placement: .navigationBarTrailing) {

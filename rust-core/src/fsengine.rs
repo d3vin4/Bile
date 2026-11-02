@@ -698,6 +698,13 @@ pub(crate) async fn move_path(
     restore_media_state(afc, &state).await;
     let _ = remove_tree_safe(afc, &stage).await;
 
+    // Surface a failed cleanup instead of leaving silent junk in Media.
+    if afc.get_file_info(&stage).await.is_ok() {
+        logger.log(format!(
+            "warning: staging folder {stage} could not be removed (see Recovery in Setup)"
+        ));
+    }
+
     result
 }
 
@@ -2157,6 +2164,93 @@ async fn fs_rename_async(
 }
 
 // ---------------------------------------------------------------------------
+// Leftover classification & cleanup
+// ---------------------------------------------------------------------------
+
+/// Friendly label for the temporary names this app (and its ancestor code)
+/// leaves in Media.
+fn leftover_kind(name: &str) -> &'static str {
+    if name.starts_with("readipa-bridge-") || name.starts_with("airlift-link-") {
+        "bridge link"
+    } else if name.starts_with("airlift-src-") {
+        "staging folder"
+    } else if name.starts_with("readipa-hold-") || name.starts_with("airlift-recovered-") {
+        "held file"
+    } else if name.starts_with("readipa-backup-") {
+        "backup copy"
+    } else if name.starts_with("readipa-pickup-") {
+        "pending write"
+    } else if name.starts_with("readipa-list-") {
+        "listing snapshot"
+    } else if name.starts_with("readipa-mkdir-") {
+        "new folder"
+    } else if name.starts_with("readipa-dump-") || name.starts_with("readipa-trash-") {
+        "deleted item"
+    } else if name.starts_with("readipa-export-") {
+        "export snapshot"
+    } else {
+        "temporary item"
+    }
+}
+
+/// True when the tree below `root` contains no regular files (only folders and
+/// symlinks) — such an entry can be removed with zero data loss.
+async fn tree_is_empty(afc: &mut AfcClient, root: &str) -> bool {
+    let mut stack: Vec<(String, usize)> = vec![(root.to_string(), 0)];
+    let mut visited = 0usize;
+    while let Some((path, depth)) = stack.pop() {
+        if depth > 32 || visited > 20_000 {
+            return false; // too big to judge — treat as containing data
+        }
+        visited += 1;
+        let info = match afc.get_file_info(&path).await {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+        if info.st_ifmt.contains("LNK") {
+            continue; // links hold no data
+        }
+        if !info.st_ifmt.contains("DIR") {
+            return false; // a real file lives here
+        }
+        if let Ok(names) = afc.list_dir(&path).await {
+            for n in names {
+                if n == "." || n == ".." {
+                    continue;
+                }
+                stack.push((format!("{}/{}", path.trim_end_matches('/'), n), depth + 1));
+            }
+        }
+    }
+    true
+}
+
+async fn leftover_json(
+    afc: &mut AfcClient,
+    name: &str,
+    info: &idevice::afc::FileInfo,
+) -> serde_json::Value {
+    let is_link = info.st_ifmt.contains("LNK");
+    let is_dir = info.st_ifmt.contains("DIR");
+    let safe = if is_link {
+        true
+    } else if is_dir {
+        tree_is_empty(afc, name).await
+    } else {
+        info.size == 0
+    };
+    json!({
+        "name": name,
+        "isDir": is_dir,
+        "isLink": is_link,
+        "size": info.size,
+        "modified": info.modified.to_string(),
+        "kind": leftover_kind(name),
+        "safeToRemove": safe,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // FFI: recovery — inspect / restore Media leftovers
 // ---------------------------------------------------------------------------
 
@@ -2211,11 +2305,22 @@ async fn media_leftovers_async(pairing_path: String, logger: &Logger) -> Result<
         if !(n.starts_with("readipa-") || n.starts_with("airlift-")) {
             continue;
         }
-        match afc.get_file_info(&n).await {
-            Ok(info) => entries.push(entry_json(&n, &info)),
+        let info = match afc.get_file_info(&n).await {
+            Ok(info) => info,
             Err(_) => continue,
-        }
+        };
+        entries.push(leftover_json(&mut afc, &n, &info).await);
     }
+    entries.sort_by(|a, b| {
+        let ka = a.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        let kb = b.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        ka.cmp(kb).then_with(|| {
+            a.get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .cmp(b.get("name").and_then(|v| v.as_str()).unwrap_or(""))
+        })
+    });
     Ok(serde_json::to_string_pretty(&json!({ "entries": entries })).map_err(|e| e.to_string())?)
 }
 
@@ -2340,4 +2445,155 @@ async fn recover_leftover_async(
         let _ = remove_one(&mut afc, &bridge_name).await;
     }
     result
+}
+
+/// Remove every leftover that provably holds no data (symlinks and empty
+/// folder trees). Anything that contains files is reported, never deleted.
+pub unsafe fn cleanup_leftovers(
+    pairing_path: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let pairing_path = opt_str(pairing_path, "airlift_pairing.plist");
+    let ctx_usize = ctx as usize;
+
+    let res = crate::ffi_util::run_with_large_stack("al_cleanup_leftovers", move || {
+        let logger = Logger {
+            cb: log_cb,
+            ctx: ctx_usize as *mut c_void,
+        };
+        idevice_ffi::run_sync_local(cleanup_leftovers_async(pairing_path.clone(), &logger))
+    });
+
+    match res {
+        Ok(Ok(s)) => {
+            if !out_json.is_null() {
+                *out_json = cstr(s);
+            }
+            0
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                *out_error = cstr(e);
+            }
+            1
+        }
+        Err(p) => {
+            if !out_error.is_null() {
+                *out_error = cstr(p);
+            }
+            1
+        }
+    }
+}
+
+async fn cleanup_leftovers_async(pairing_path: String, logger: &Logger) -> Result<String, String> {
+    let pairing_bytes = read_pairing(&pairing_path)?;
+    let mut tunnel = exploit::connect_tunnel(&pairing_bytes, logger).await?;
+    let mut afc = tunnel.connect_afc(logger).await?;
+
+    let names = media_list_root(&mut afc).await?;
+    let mut removed: Vec<String> = Vec::new();
+    let mut kept: Vec<String> = Vec::new();
+
+    for name in names {
+        if !(name.starts_with("readipa-") || name.starts_with("airlift-")) {
+            continue;
+        }
+        let info = match afc.get_file_info(&name).await {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+        let is_link = info.st_ifmt.contains("LNK");
+        let is_dir = info.st_ifmt.contains("DIR");
+        let safe = if is_link {
+            true
+        } else if is_dir {
+            tree_is_empty(&mut afc, &name).await
+        } else {
+            info.size == 0
+        };
+        if safe {
+            match remove_tree_safe(&mut afc, &name).await {
+                Ok(()) => {
+                    logger.log(format!("cleanup: removed {name}"));
+                    removed.push(name);
+                }
+                Err(e) => {
+                    logger.log(format!("cleanup: could not remove {name}: {e}"));
+                    kept.push(name);
+                }
+            }
+        } else {
+            kept.push(name);
+        }
+    }
+
+    Ok(serde_json::to_string_pretty(&json!({
+        "removed": removed.len(),
+        "kept": kept.len(),
+        "keptNames": kept,
+    }))
+    .map_err(|e| e.to_string())?)
+}
+
+/// Explicitly delete one leftover (the caller confirms first). Symlink-safe.
+pub unsafe fn delete_leftover(
+    pairing_path: *const c_char,
+    name: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let pairing_path = opt_str(pairing_path, "airlift_pairing.plist");
+    let name = opt_str(name, "");
+    let ctx_usize = ctx as usize;
+
+    if !safe_media_name(&name) || !(name.starts_with("readipa-") || name.starts_with("airlift-")) {
+        if !out_error.is_null() {
+            *out_error = cstr("refusing to delete: not a Readipa leftover");
+        }
+        return 1;
+    }
+
+    let res = crate::ffi_util::run_with_large_stack("al_delete_leftover", move || {
+        let logger = Logger {
+            cb: log_cb,
+            ctx: ctx_usize as *mut c_void,
+        };
+        idevice_ffi::run_sync_local(delete_leftover_async(
+            pairing_path.clone(),
+            name.clone(),
+            &logger,
+        ))
+    });
+
+    match res {
+        Ok(Ok(())) => 0,
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                *out_error = cstr(e);
+            }
+            1
+        }
+        Err(p) => {
+            if !out_error.is_null() {
+                *out_error = cstr(p);
+            }
+            1
+        }
+    }
+}
+
+async fn delete_leftover_async(
+    pairing_path: String,
+    name: String,
+    logger: &Logger,
+) -> Result<(), String> {
+    let pairing_bytes = read_pairing(&pairing_path)?;
+    let mut tunnel = exploit::connect_tunnel(&pairing_bytes, logger).await?;
+    let mut afc = tunnel.connect_afc(logger).await?;
+    remove_tree_safe(&mut afc, &name).await
 }
