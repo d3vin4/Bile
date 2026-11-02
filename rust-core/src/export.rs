@@ -295,7 +295,7 @@ async fn export_async(
     let mut mode = "direct";
     let mut relocate: Option<(String, String)> = None;
 
-    if engine.direct {
+    if engine.direct_read {
         let root_afc = engine.path(&rel_path);
         archive_tree(&mut engine.afc, &root_afc, &prefix, &mut exporter, logger).await;
     } else {

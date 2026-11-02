@@ -14,7 +14,7 @@ final class AppState: ObservableObject {
     @Published var deviceIP: String = "10.7.0.1"
     @Published var tunnelResults: [TunnelProbe.Result] = []
     @Published var isTestingTunnel = false
-    @Published var liveActivitiesEnabled = PairingController.liveActivitiesEnabled
+    @Published var liveActivitiesEnabled = false
 
     // MARK: - Catalog
 
@@ -57,6 +57,7 @@ final class AppState: ObservableObject {
     init() {
         // didSet does not fire during initialization.
         RustBridge.setAllowRiskyMoves(allowRiskyMoves)
+        liveActivitiesEnabled = PairingController.liveActivitiesEnabled
     }
 
     var pairingPath: String { PairingController.pairingFilePath() }

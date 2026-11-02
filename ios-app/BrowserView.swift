@@ -78,8 +78,11 @@ struct BrowserView: View {
     private var modeBanner: some View {
         if state.bridgeRequiresRiskyMoves && !state.allowRiskyMoves {
             banner(
-                "This container blocks direct access. Enable “Allow risky moves” in Setup to list it "
-                + "(the folder is moved to Media temporarily).",
+                state.bridgeMode == "bridge_readonly"
+                    ? "Folder listing needs “Allow risky moves” in Setup. Direct reads already work, "
+                      + "so Save and ZIP export never touch the app."
+                    : "This container blocks direct access. Enable “Allow risky moves” in Setup to list it "
+                      + "(the folder is moved to Media temporarily).",
                 color: .orange
             )
         } else if state.bridgeMode == "bridge_move" {
@@ -240,8 +243,16 @@ struct BrowserView: View {
     private var renameSheet: some View {
         NavigationView {
             Form {
-                TextField("New name", text: $renameName)
-                Button("Rename") {
+                Section {
+                    TextField("New name", text: $renameName)
+                        .autocapitalization(.none)
+                } footer: {
+                    Text("A name only renames. To move the item, include a path relative to this "
+                         + "folder, e.g. Library/Preferences/newname.plist. Readipa refuses to "
+                         + "overwrite an existing item.")
+                    .font(.caption2)
+                }
+                Button("Apply") {
                     if let t = renameTarget, !renameName.isEmpty {
                         state.renameEntry(t, to: renameName)
                     }
@@ -249,7 +260,7 @@ struct BrowserView: View {
                 }
                 .disabled(renameName.isEmpty)
             }
-            .navigationTitle("Rename")
+            .navigationTitle("Rename or move")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { showRename = false }

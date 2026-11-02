@@ -244,7 +244,7 @@ final class PairingController: ObservableObject {
 
     // MARK: - Live Activity
 
-    static var liveActivitiesEnabled: Bool {
+    nonisolated static var liveActivitiesEnabled: Bool {
         ActivityAuthorizationInfo().areActivitiesEnabled
     }
 

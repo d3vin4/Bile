@@ -824,6 +824,41 @@ async fn bridge_matches(
     }
 }
 
+/// Probe what the Media bridge actually permits.
+///
+/// AFC validates directory enumeration and file access separately, so a denied
+/// `list_dir` does **not** imply that reads are denied. Knowing the difference
+/// lets reads avoid any relocation of live app data.
+async fn probe_bridge(afc: &mut AfcClient, bridge: &str) -> (bool, bool) {
+    let list_ok = afc.list_dir(bridge).await.is_ok();
+    if list_ok {
+        return (true, true);
+    }
+    // Directory enumeration is denied — check whether reading still works by
+    // stat'ing paths that exist in virtually every container.
+    const PROBES: [&str; 8] = [
+        ".",
+        "Library",
+        "Documents",
+        "tmp",
+        "Library/Preferences",
+        "Library/Caches",
+        "Library/Preferences/.GlobalPreferences.plist",
+        ".com.apple.mobile_container_manager.metadata.plist",
+    ];
+    for probe in PROBES {
+        let path = if probe == "." {
+            format!("{bridge}/.")
+        } else {
+            format!("{bridge}/{probe}")
+        };
+        if afc.get_file_info(&path).await.is_ok() {
+            return (false, true);
+        }
+    }
+    (false, false)
+}
+
 /// Resolve a (possibly relative) symlink target against the directory holding
 /// the link. `/var/mobile/Media` + `../../../var/mobile/X` → `/var/mobile/X`.
 fn resolve_link_target(link_dir: &str, target: &str) -> String {
@@ -938,10 +973,12 @@ async fn bridge_open_async(
         "bridge": bridge,
         "container": container_path,
         "mode": mode,
-        "requiresRiskyMoves": !direct,
+        "requiresRiskyMoves": !direct_list,
         "capabilities": {
-            "list": direct || risky_moves_allowed(),
-            "read": true,
+            "list": direct_list || risky_moves_allowed(),
+            "read": direct_read || risky_moves_allowed(),
+            "readDirect": direct_read,
+            "listDirect": direct_list,
             "write": true,
             "delete": true,
             "mkdir": true,
@@ -1012,7 +1049,12 @@ async fn bridge_close_async(
 pub(crate) struct Engine {
     pub(crate) afc: AfcClient,
     pub(crate) bridge: String,
-    pub(crate) direct: bool,
+    /// `list_dir` through the bridge works (fastest path for browsing).
+    pub(crate) direct_list: bool,
+    /// Reading/statting files through the bridge works. This is a *separate*
+    /// probe from listing: AFC may refuse directory enumeration while still
+    /// serving file reads, in which case no relocation is ever needed.
+    pub(crate) direct_read: bool,
     pub(crate) house_arrest: bool,
 }
 
@@ -1059,7 +1101,8 @@ pub(crate) async fn open_engine(
                 Engine {
                     afc,
                     bridge: String::new(),
-                    direct: true,
+                    direct_list: true,
+                    direct_read: true,
                     house_arrest: true,
                 },
             ));
@@ -1077,14 +1120,15 @@ pub(crate) async fn open_engine(
     if !bridge_matches(&mut afc, bridge_name, container_path).await? {
         return Err("Bridge does not point at the requested container; refusing to operate".into());
     }
-    let direct = afc.list_dir(bridge_name).await.is_ok();
+    let (direct_list, direct_read) = probe_bridge(&mut afc, bridge_name).await;
 
     Ok((
         tunnel,
         Engine {
             afc,
             bridge: bridge_name.to_string(),
-            direct,
+            direct_list,
+            direct_read,
             house_arrest: false,
         },
     ))
@@ -1240,7 +1284,7 @@ async fn fs_list_async(
 
     // Base path the entries are stat'ed through. In move mode this is the Media
     // staging path, because the bridge denies traversal.
-    let (names, base) = if engine.direct {
+    let (names, base) = if engine.direct_list {
         let afc_path = engine.path(&rel_path);
         let names = engine
             .afc
@@ -1524,7 +1568,7 @@ async fn fs_read_async(
         let _ = std::fs::create_dir_all(parent);
     }
 
-    if engine.direct {
+    if engine.direct_read {
         let afc_path = engine.path(&rel_path);
         let mut fd = engine
             .afc
@@ -1655,7 +1699,7 @@ async fn fs_write_async(
     let (mut tunnel, mut engine) =
         open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
 
-    if engine.direct {
+    if engine.direct_read {
         let afc_path = engine.path(&rel_path);
         // Never write a file over an existing directory.
         if let Ok(info) = engine.afc.get_file_info(&afc_path).await {
@@ -1846,7 +1890,7 @@ async fn fs_mkdir_async(
     let (mut tunnel, mut engine) =
         open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
 
-    if engine.direct {
+    if engine.direct_read {
         let afc_path = engine.path(&rel_path);
         engine
             .afc
@@ -1957,7 +2001,7 @@ async fn fs_remove_async(
     let (mut tunnel, mut engine) =
         open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
 
-    if engine.direct {
+    if engine.direct_read {
         let afc_path = engine.path(&rel_path);
         // Symlink-safe recursive delete.
         return remove_tree_safe(&mut engine.afc, &afc_path).await;
@@ -2053,7 +2097,7 @@ async fn fs_rename_async(
     let (mut tunnel, mut engine) =
         open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
 
-    if engine.direct {
+    if engine.direct_read {
         let old_path = engine.path(&old_rel);
         let new_path = engine.path(&new_rel);
         // Refuse to overwrite: silently destroying the destination would be data loss.

@@ -94,13 +94,41 @@ struct ContainerDetailView: View {
     var name: String { app?.name ?? group?.id ?? "" }
 
     var body: some View {
-        VStack {
-            Text(containerPath).font(.caption2).foregroundStyle(.secondary).padding()
-            Button("Open in Files") {
-                state.openContainer(path: containerPath, bundleId: bundleId, name: name)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(containerPath)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                if let app = app, !app.groupContainers.isEmpty {
+                    Text("App Groups").font(.headline)
+                    ForEach(app.groupContainers.sorted(by: { $0.key < $1.key }), id: \.key) { key, path in
+                        Button {
+                            state.openContainer(path: path, bundleId: app.bundleId, name: key)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(key).font(.caption.bold())
+                                Text(path).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .readipaGlassCard(cornerRadius: 12)
+                    }
+                }
+
+                Button("Open in Files") {
+                    state.openContainer(path: containerPath, bundleId: bundleId, name: name)
+                }
+                .readipaGlassButton(prominent: true)
+
+                Text("Open the container, then use the ⤓ button in the Files tab to export it as a "
+                     + "ZIP and save it to Files. Exports are read-only: nothing in the container is "
+                     + "modified, and symbolic links are recorded instead of followed.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderedProminent)
-            Spacer()
+            .padding()
         }
         .navigationTitle(name)
     }
