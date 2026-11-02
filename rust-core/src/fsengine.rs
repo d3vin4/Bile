@@ -1728,26 +1728,42 @@ async fn fs_read_async(
     // Always try the direct read first: if AFC serves the file through the
     // bridge, nothing in the container is touched at all.
     let afc_path = engine.path(&rel_path);
-    if let Ok(mut fd) = engine.afc.open(&afc_path, AfcFopenMode::RdOnly).await {
-        let written = stream_afc_to_local(&mut fd, &dest_local_path).await;
-        let _ = fd.close().await;
-        match written {
-            Ok(_) => return Ok(()),
-            Err(e) => {
-                // The open worked but the transfer failed — retry once directly
-                // before falling back to a relocation.
-                if let Ok(mut fd2) = engine.afc.open(&afc_path, AfcFopenMode::RdOnly).await {
-                    let retry = stream_afc_to_local(&mut fd2, &dest_local_path).await;
-                    let _ = fd2.close().await;
-                    if retry.is_ok() {
-                        return Ok(());
-                    }
+    let mut direct_error: Option<String> = None;
+    {
+        match engine.afc.open(&afc_path, AfcFopenMode::RdOnly).await {
+            Ok(mut fd) => match stream_afc_to_local(&mut fd, &dest_local_path).await {
+                Ok(_) => {
+                    let _ = fd.close().await;
+                    return Ok(());
                 }
-                logger.log(format!("direct read failed ({e}); falling back"));
-            }
+                Err(e) => {
+                    let _ = fd.close().await;
+                    direct_error = Some(e);
+                }
+            },
+            Err(e) => direct_error = Some(format!("open: {e:?}")),
         }
-    } else {
-        logger.log("direct read unavailable through the bridge");
+    }
+
+    // One clean retry before doing anything destructive.
+    if direct_error.is_some() {
+        let retry = {
+            match engine.afc.open(&afc_path, AfcFopenMode::RdOnly).await {
+                Ok(mut fd) => {
+                    let r = stream_afc_to_local(&mut fd, &dest_local_path).await;
+                    let _ = fd.close().await;
+                    r.map(|_| ())
+                }
+                Err(e) => Err(format!("open: {e:?}")),
+            }
+        };
+        if retry.is_ok() {
+            return Ok(());
+        }
+        logger.log(format!(
+            "direct read unavailable ({}); falling back to a verified relocation",
+            direct_error.unwrap_or_default()
+        ));
     }
 
     if !risky_moves_allowed() {
