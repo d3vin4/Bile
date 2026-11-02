@@ -53,9 +53,9 @@ enum RustBridge {
               let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let entries = obj["entries"] as? [[String: Any]] else {
-            return ([], bridge)
+            return []
         }
-        return (entries, (obj["bridge"] as? String) ?? bridge)
+        return entries
     }
 
     static func recoverLeftover(pairingPath: String, leftoverName: String, containerPath: String, relPath: String, bridge: String) throws {

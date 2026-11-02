@@ -188,8 +188,8 @@ final class AppState: ObservableObject {
                     self.bridge = b
                     self.bridgeMode = m
                     self.bridgeRequiresRiskyMoves = risky
+                    self.loadFiles()
                 }
-                await loadFiles()
             } catch {
                 await MainActor.run { self.filesError = error.localizedDescription }
             }

@@ -28,7 +28,7 @@ final class PairingController: ObservableObject {
 
     /// Persisted altIRK keeps the host identity stable across pairings so a
     /// device that has already paired recognises this host.
-    private static let altIRKKey = "readipa.pairingHostAltIRK"
+    nonisolated private static let altIRKKey = "readipa.pairingHostAltIRK"
     nonisolated private static var storedAltIRK: String {
         get { UserDefaults.standard.string(forKey: altIRKKey) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: altIRKKey) }
