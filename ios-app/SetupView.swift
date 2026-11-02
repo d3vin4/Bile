@@ -208,6 +208,10 @@ struct SetupView: View {
 
     private var iconCacheSection: some View {
         Section {
+            Button(lang("gate.reset")) {
+                UserDefaults.standard.set(false, forKey: LaunchGateView.skipKey)
+                state.logLine("The start-up warning will show again next launch")
+            }
             Button(lang("refresh.icons")) {
                 IconStore.shared.clearCache()
                 state.logLine("Icon cache cleared — icons reload as you scroll")

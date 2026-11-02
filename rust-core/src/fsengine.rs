@@ -946,7 +946,7 @@ async fn bridge_usable(afc: &mut AfcClient, bridge: &str, container_path: &str) 
 /// through a Media symlink is not always accepted for the bare path, so the
 /// trailing-slash and `/.` forms are attempted too. This keeps browsing on the
 /// direct path (no relocation of live app data) whenever it is possible at all.
-async fn list_dir_variants(afc: &mut AfcClient, full_path: &str) -> Option<Vec<String>> {
+async fn list_dir_variants(afc: &mut AfcClient, full_path: &str) -> (Option<Vec<String>>, String) {
     let trimmed = if full_path.is_empty() {
         "/".to_string()
     } else {
@@ -960,12 +960,14 @@ async fn list_dir_variants(afc: &mut AfcClient, full_path: &str) -> Option<Vec<S
     if trimmed == "/" {
         candidates = vec!["/".to_string(), ".".to_string(), "".to_string()];
     }
+    let mut last = String::from("no attempt");
     for candidate in candidates {
-        if let Ok(names) = afc.list_dir(&candidate).await {
-            return Some(names);
+        match afc.list_dir(&candidate).await {
+            Ok(names) => return (Some(names), String::new()),
+            Err(e) => last = format!("{e:?}"),
         }
     }
-    None
+    (None, last)
 }
 
 /// Probe what the Media bridge actually permits.
@@ -1236,17 +1238,23 @@ pub(crate) async fn open_engine(
 
     // Prefer HouseArrest: it is jailed at the container and needs no relocations.
     if !bundle_id.is_empty() && container_path.starts_with(DATA_ROOT) {
-        if let Ok(afc) = try_house_arrest(&mut tunnel, bundle_id, logger).await {
-            return Ok((
-                tunnel,
-                Engine {
-                    afc,
-                    bridge: String::new(),
-                    direct_list: true,
-                    direct_read: true,
-                    house_arrest: true,
-                },
-            ));
+        for command in ["VendContainer", "VendDocuments"] {
+            match try_vend(&mut tunnel, bundle_id, command, logger).await {
+                Ok(afc) => {
+                    logger.log(format!("HouseArrest {command} granted for {bundle_id}"));
+                    return Ok((
+                        tunnel,
+                        Engine {
+                            afc,
+                            bridge: String::new(),
+                            direct_list: true,
+                            direct_read: true,
+                            house_arrest: true,
+                        },
+                    ));
+                }
+                Err(e) => logger.log(format!("HouseArrest {command} refused: {e}")),
+            }
         }
         logger.log("HouseArrest unavailable for this app; using the AirLift bridge");
     }
@@ -1290,20 +1298,6 @@ pub(crate) async fn open_engine(
             house_arrest: false,
         },
     ))
-}
-
-async fn try_house_arrest(
-    tunnel: &mut AppDeviceTunnel,
-    bundle_id: &str,
-    logger: &Logger,
-) -> Result<AfcClient, String> {
-    let stream = tunnel
-        .connect_service("com.apple.mobile.house_arrest", logger)
-        .await?;
-    let ha = HouseArrestClient::new(idevice::Idevice::new(stream, "Airlift"));
-    ha.vend_container(bundle_id.to_string())
-        .await
-        .map_err(|e| format!("{e:?}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1444,7 +1438,7 @@ async fn fs_list_async(
     // "no", because AFC accepts some path spellings and rejects others. Only a
     // real failure falls back to relocating anything.
     let direct_path = engine.path(&rel_path);
-    let direct = list_dir_variants(&mut engine.afc, &direct_path).await;
+    let (direct, direct_error) = list_dir_variants(&mut engine.afc, &direct_path).await;
 
     // Base path the entries are stat'ed through. In move mode this is the Media
     // staging path, because the bridge denies traversal.
@@ -1452,12 +1446,12 @@ async fn fs_list_async(
         (names, engine.path(&rel_path))
     } else {
         if !risky_moves_allowed() {
-            return Err(
-                "Folder listing is blocked for this container. Turn on \"Allow risky moves\" in \
-                 Setup to try the AirLift relocation fallback — reading individual files and \
-                 exporting the container as a ZIP still work without it."
-                    .to_string(),
-            );
+            return Err(format!(
+                "Folder listing is blocked for this container (AFC said: {direct_error}).\n\
+                 Turn on \"Allow risky moves\" in Setup to try the AirLift relocation fallback — \
+                 reading individual files and exporting the container as a ZIP still work without it.\n\
+                 Tap “Diagnose” in the Files toolbar to see exactly what is allowed here."
+            ));
         }
         // Relocate the directory out to Media, list it, then put it back.
         let token = exploit::random_hex(8);
@@ -1469,8 +1463,9 @@ async fn fs_list_async(
             .await
             .map_err(|e| {
                 format!(
-                    "This container refuses both direct listing and the relocation fallback ({e}).\n\
-                     Nothing was changed — the folder is exactly where it was.                      Use “Export as ZIP” or open individual files instead."
+                    "Direct listing failed (AFC said: {direct_error}) and the relocation \
+                     fallback also failed ({e}).\nNothing was changed — the folder is exactly \
+                     where it was.\nTap “Diagnose” in the Files toolbar for the full report."
                 )
             })?;
 
@@ -2879,4 +2874,247 @@ async fn export_leftover_async(
     let r = stream_afc_to_local(&mut fd, &dest_local_path).await;
     let _ = fd.close().await;
     r.map(|_| ())
+}
+
+// ---------------------------------------------------------------------------
+// FFI: diagnostics
+// ---------------------------------------------------------------------------
+
+/// Runs a battery of read-only probes against one container and returns a
+/// human-readable report. Nothing is modified.
+pub unsafe fn diagnose_container(
+    pairing_path: *const c_char,
+    bundle_id: *const c_char,
+    container_path: *const c_char,
+    bridge: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let pairing_path = opt_str(pairing_path, "airlift_pairing.plist");
+    let bundle_id = opt_str(bundle_id, "");
+    let container_path = opt_str(container_path, "");
+    let bridge = opt_str(bridge, "");
+    let ctx_usize = ctx as usize;
+
+    if !allowed_container(&container_path) {
+        if !out_error.is_null() {
+            *out_error = cstr("container_path is not allowed");
+        }
+        return 1;
+    }
+
+    let res = crate::ffi_util::run_with_large_stack("al_diagnose_container", move || {
+        let logger = Logger {
+            cb: log_cb,
+            ctx: ctx_usize as *mut c_void,
+        };
+        idevice_ffi::run_sync_local(diagnose_async(
+            pairing_path.clone(),
+            bundle_id.clone(),
+            container_path.clone(),
+            bridge.clone(),
+            &logger,
+        ))
+    });
+
+    match res {
+        Ok(Ok(s)) => {
+            if !out_json.is_null() {
+                *out_json = cstr(s);
+            }
+            0
+        }
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                *out_error = cstr(e);
+            }
+            1
+        }
+        Err(p) => {
+            if !out_error.is_null() {
+                *out_error = cstr(p);
+            }
+            1
+        }
+    }
+}
+
+async fn diagnose_async(
+    pairing_path: String,
+    bundle_id: String,
+    container_path: String,
+    bridge: String,
+    logger: &Logger,
+) -> Result<String, String> {
+    let pairing_bytes = read_pairing(&pairing_path)?;
+    let mut tunnel = exploit::connect_tunnel(&pairing_bytes, logger).await?;
+    let mut report = serde_json::Map::new();
+    report.insert("container".into(), json!(container_path));
+    report.insert("bundleId".into(), json!(bundle_id));
+    report.insert("riskyMovesEnabled".into(), json!(risky_moves_allowed()));
+
+    // 1. HouseArrest, both vend modes.
+    if !bundle_id.is_empty() {
+        for (label, command) in [
+            ("VendContainer", "VendContainer"),
+            ("VendDocuments", "VendDocuments"),
+        ] {
+            let result = try_vend(&mut tunnel, &bundle_id, command, logger).await;
+            match result {
+                Ok(mut afc) => {
+                    let names = afc.list_dir(".").await.map(|n| n.len()).unwrap_or(0);
+                    report.insert(
+                        format!("houseArrest.{label}"),
+                        json!({"ok": true, "rootEntries": names}),
+                    );
+                }
+                Err(e) => {
+                    report.insert(
+                        format!("houseArrest.{label}"),
+                        json!({"ok": false, "error": e}),
+                    );
+                }
+            }
+        }
+    } else {
+        report.insert(
+            "houseArrest".into(),
+            json!({"ok": false, "error": "no bundle id supplied for this container"}),
+        );
+    }
+
+    // 2. AFC through the bridge.
+    let mut afc = tunnel.connect_afc(logger).await?;
+    let bridge_report = match afc.get_file_info(&bridge).await {
+        Ok(info) => json!({
+            "ok": true,
+            "isLink": info.st_ifmt.contains("LNK"),
+            "target": info.st_link_target,
+        }),
+        Err(e) => json!({"ok": false, "error": format!("{e:?}")}),
+    };
+    report.insert(format!("bridge[{bridge}]"), bridge_report);
+
+    if let Some(target) = afc
+        .get_file_info(&bridge)
+        .await
+        .ok()
+        .and_then(|i| i.st_link_target.clone())
+    {
+        let resolved = resolve_link_target("/var/mobile/Media", &target);
+        report.insert(
+            "bridgeTargetResolved".into(),
+            json!({
+                "resolved": resolved,
+                "matchesContainer": resolved == normalize_path(&container_path),
+            }),
+        );
+    }
+
+    // 3. Per-path probes through the bridge.
+    let mut probes = serde_json::Map::new();
+    for sub in [
+        "",
+        ".",
+        "Library",
+        "Documents",
+        "tmp",
+        "Library/Caches",
+        "Library/Preferences",
+    ] {
+        let path = if sub.is_empty() {
+            bridge.clone()
+        } else {
+            format!("{bridge}/{sub}")
+        };
+        let stat = match afc.get_file_info(&path).await {
+            Ok(info) => json!(info.st_ifmt),
+            Err(e) => json!(format!("ERR {e:?}")),
+        };
+        let (listed, list_err) = list_dir_variants(&mut afc, &path).await;
+        probes.insert(
+            sub.to_string(),
+            json!({
+                "stat": stat,
+                "list": match listed { Some(n) => json!(format!("{} entries", n.len())), None => json!(format!("ERR {list_err}")) },
+            }),
+        );
+    }
+    report.insert("bridgeProbes".into(), serde_json::Value::Object(probes));
+
+    // 4. Can we read a known small file?
+    let metadata = ".com.apple.mobile_container_manager.metadata.plist";
+    let (read_ok, read_err) = match afc.open(metadata, AfcFopenMode::RdOnly).await {
+        Ok(mut fd) => {
+            let r = fd.read_entire().await;
+            let _ = fd.close().await;
+            match r {
+                Ok(d) => (true, format!("{} bytes", d.len())),
+                Err(e) => (false, format!("{e:?}")),
+            }
+        }
+        Err(e) => (false, format!("{e:?}")),
+    };
+    report.insert(
+        "containerMetadataReadable".into(),
+        json!({"ok": read_ok, "detail": read_err}),
+    );
+
+    // 5. Optional: try a single tiny relocation to see whether moves work.
+    if risky_moves_allowed() {
+        let token = exploit::random_hex(6);
+        let staging = format!("readipa-diag-{token}");
+        let meta_abs = format!("{}/{}", container_path.trim_end_matches('/'), metadata);
+        let moved = move_path(&mut tunnel, &mut afc, &meta_abs, &staging, logger).await;
+        match &moved {
+            Ok(()) => {
+                report.insert(
+                    "relocationProbe".into(),
+                    json!({"ok": true, "note": "moved out and back"}),
+                );
+                let back = move_path(
+                    &mut tunnel,
+                    &mut afc,
+                    &format!("{MEDIA_ROOT}{staging}"),
+                    &bridge,
+                    logger,
+                )
+                .await;
+                if let Err(e) = back {
+                    report.insert(
+                        "relocationRestore".into(),
+                        json!({"ok": false, "error": e, "keptAt": format!("{MEDIA_ROOT}{staging}")}),
+                    );
+                }
+            }
+            Err(e) => {
+                report.insert("relocationProbe".into(), json!({"ok": false, "error": e}));
+            }
+        }
+    }
+
+    Ok(
+        serde_json::to_string_pretty(&serde_json::Value::Object(report))
+            .map_err(|e| e.to_string())?,
+    )
+}
+
+async fn try_vend(
+    tunnel: &mut AppDeviceTunnel,
+    bundle_id: &str,
+    command: &str,
+    logger: &Logger,
+) -> Result<AfcClient, String> {
+    let stream = tunnel
+        .connect_service("com.apple.mobile.house_arrest", logger)
+        .await?;
+    let client = HouseArrestClient::new(idevice::Idevice::new(stream, "Airlift"));
+    let result = if command == "VendDocuments" {
+        client.vend_documents(bundle_id.to_string()).await
+    } else {
+        client.vend_container(bundle_id.to_string()).await
+    };
+    result.map_err(|e| format!("{e:?}"))
 }

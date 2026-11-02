@@ -168,6 +168,16 @@ void al_clear_target_hosts(void);
 // Container catalog & file system (Application Containers + App Groups)
 // ---------------------------------------------------------------------------
 
+// Read-only diagnostic report for one container (HouseArrest, bridge, probes).
+int32_t al_diagnose_container(const char *pairing_path,
+                              const char *bundle_id,
+                              const char *container_path,
+                              const char *bridge,
+                              ALLogCallback log_cb,
+                              void *ctx,
+                              char **out_json,
+                              char **out_error);
+
 // Copy a leftover item out of Media to a local file (folders are zipped).
 int32_t al_export_leftover(const char *pairing_path,
                            const char *name,

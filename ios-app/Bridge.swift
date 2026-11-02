@@ -96,6 +96,36 @@ enum RustBridge {
         free(outErr)
     }
 
+    static func diagnoseContainer(
+        pairingPath: String,
+        bundleId: String,
+        containerPath: String,
+        bridge: String
+    ) throws -> [String: Any] {
+        var outJson: UnsafeMutablePointer<CChar>?
+        var outErr: UnsafeMutablePointer<CChar>?
+        let rc = withCString(pairingPath) { pp in
+            withCString(bundleId) { bi in
+                withCString(containerPath) { cp in
+                    withCString(bridge) { bp in
+                        al_diagnose_container(pp, bi, cp, bp, logCallback, nil, &outJson, &outErr)
+                    }
+                }
+            }
+        }
+        defer { free(outJson); free(outErr) }
+        if rc != 0 {
+            let msg = outErr.map { String(cString: $0) } ?? "diagnosis failed"
+            throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        guard let json = outJson.map({ String(cString: $0) }),
+              let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return obj
+    }
+
     static func exportLeftover(pairingPath: String, name: String, destLocalPath: String) throws {
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in

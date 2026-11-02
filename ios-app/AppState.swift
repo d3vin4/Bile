@@ -46,6 +46,9 @@ final class AppState: ObservableObject {
     @Published var isExporting = false
     @Published var bridgeRequiresRiskyMoves = false
     @Published var needsRecoveryCheck = false
+    @Published var diagnosisText: String? = nil
+    @Published var showDiagnosis = false
+    @Published var isDiagnosing = false
     @Published var leftovers: [LeftoverEntry] = []
     @Published var selectedTab: AppTab = .setup
     @Published var pathHistory: [String] = []
@@ -629,6 +632,45 @@ final class AppState: ObservableObject {
                 // Not fatal — the tunnel may simply be down.
             }
         }
+    }
+
+    /// Runs the read-only diagnostic battery and shows the raw report.
+    func diagnose() {
+        guard let c = selectedContainer else { return }
+        isDiagnosing = true
+        logLine("Diagnosing \(c.name)…")
+        Task {
+            do {
+                let report = try RustBridge.diagnoseContainer(
+                    pairingPath: pairingPath,
+                    bundleId: c.bundleId,
+                    containerPath: c.path,
+                    bridge: bridge
+                )
+                let text = (try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]))
+                    .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                await MainActor.run {
+                    isDiagnosing = false
+                    diagnosisText = text
+                    showDiagnosis = true
+                    logLine("Diagnosis ready — see the report sheet.")
+                }
+            } catch {
+                await MainActor.run {
+                    isDiagnosing = false
+                    logLine("Diagnosis failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    func shareDiagnosis() {
+        guard let text = diagnosisText else { return }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("readipa-diagnosis-\(Int(Date().timeIntervalSince1970)).json")
+        try? text.write(to: url, atomically: true, encoding: .utf8)
+        exportedFileURL = url
+        showShareSheet = true
     }
 
     func scanLeftovers() {

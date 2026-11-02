@@ -36,8 +36,7 @@ struct ReadipaApp: App {
 struct RootView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
-    @State private var gateRemaining = 5
-    @State private var gatePassed = false
+    @State private var gatePassed = UserDefaults.standard.bool(forKey: LaunchGateView.skipKey)
 
     var body: some View {
         if gatePassed {
@@ -78,43 +77,8 @@ struct RootView: View {
     }
 
     private var launchGate: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "exclamationmark.shield.fill")
-                .font(.system(size: 72))
-                .foregroundStyle(.orange)
-            Text("Readipa")
-                .font(.largeTitle.bold())
-            Text("Important notice")
-                .font(.title3.bold())
-            Text("Readipa is a native file manager for Application Containers and App Groups.\n\n"
-                 + "It only operates inside /var/mobile/Containers/Data/Application and "
-                 + "/var/mobile/Containers/Shared/AppGroup. It never deletes anything outside "
-                 + "those roots and never follows symbolic links while cleaning up.\n\n"
-                 + "Pairing, exports and risky moves are verified step by step; if an operation "
-                 + "cannot finish you will always be told exactly where your data is kept.\n\n"
-                 + "Only use this app on devices you own and apps you are authorised to inspect.")
-                .multilineTextAlignment(.center)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
-
-            Text("Entering in \(gateRemaining)s")
-                .font(.headline.monospacedDigit())
-                .foregroundStyle(.orange)
-
-            Button("I understand") { gatePassed = true }
-                .readipaGlassButton(prominent: true)
-                .disabled(gateRemaining > 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(uiColor: .systemBackground))
-        .task {
-            for remaining in (1...5).reversed() {
-                gateRemaining = remaining
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
-            gateRemaining = 0
-            gatePassed = true
+        LaunchGateView {
+            withAnimation { gatePassed = true }
         }
     }
 }

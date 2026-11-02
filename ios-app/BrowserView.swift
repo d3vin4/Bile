@@ -31,6 +31,7 @@ struct BrowserView: View {
             .sheet(isPresented: $showNewFolder) { newFolderSheet }
             .sheet(isPresented: $showRename) { renameSheet }
             .sheet(isPresented: $state.showPreview) { previewSheet }
+            .sheet(isPresented: $state.showDiagnosis) { diagnosisSheet }
             .fileImporter(
                 isPresented: $showImporter,
                 allowedContentTypes: [.data],
@@ -313,6 +314,14 @@ struct BrowserView: View {
                     Image(systemName: "square.and.arrow.down.on.square")
                 }
                 .disabled(state.isExporting)
+                Button { state.diagnose() } label: {
+                    if state.isDiagnosing {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "stethoscope")
+                    }
+                }
+                .disabled(state.isDiagnosing)
                 Button { showNewFolder = true } label: { Image(systemName: "folder.badge.plus") }
                 Button { showImporter = true } label: { Image(systemName: "square.and.arrow.down") }
             }
@@ -368,6 +377,30 @@ struct BrowserView: View {
             }
         }
         .presentationDetents([.height(220)])
+    }
+
+    private var diagnosisSheet: some View {
+        NavigationView {
+            ScrollView {
+                Text(state.diagnosisText ?? "")
+                    .font(.system(.caption2, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .navigationTitle("Diagnosis")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(lang("done")) { state.showDiagnosis = false }
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { state.shareDiagnosis() } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+            }
+        }
     }
 
     private var previewSheet: some View {
