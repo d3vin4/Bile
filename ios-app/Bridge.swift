@@ -96,34 +96,35 @@ enum RustBridge {
         free(outErr)
     }
 
-    static func diagnoseContainer(
+    /// Asks the core what iOS actually allows for this container.
+    static func probeAccess(
         pairingPath: String,
         bundleId: String,
         containerPath: String,
         bridge: String
-    ) throws -> [String: Any] {
+    ) throws -> (access: String, evidence: [String]) {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?
         let rc = withCString(pairingPath) { pp in
             withCString(bundleId) { bi in
                 withCString(containerPath) { cp in
                     withCString(bridge) { bp in
-                        al_diagnose_container(pp, bi, cp, bp, logCallback, nil, &outJson, &outErr)
+                        al_probe_access(pp, bi, cp, bp, logCallback, nil, &outJson, &outErr)
                     }
                 }
             }
         }
         defer { free(outJson); free(outErr) }
         if rc != 0 {
-            let msg = outErr.map { String(cString: $0) } ?? "diagnosis failed"
+            let msg = outErr.map { String(cString: $0) } ?? "probe failed"
             throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
         }
         guard let json = outJson.map({ String(cString: $0) }),
               let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return [:]
+            return ("unknown", [])
         }
-        return obj
+        return ((obj["access"] as? String) ?? "unknown", (obj["evidence"] as? [String]) ?? [])
     }
 
     static func exportLeftover(pairingPath: String, name: String, destLocalPath: String) throws {

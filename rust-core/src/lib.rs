@@ -311,7 +311,7 @@ pub unsafe extern "C" fn al_fs_remove(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn al_diagnose_container(
+pub unsafe extern "C" fn al_probe_access(
     pairing_path: *const c_char,
     bundle_id: *const c_char,
     container_path: *const c_char,
@@ -322,7 +322,7 @@ pub unsafe extern "C" fn al_diagnose_container(
     out_error: *mut *mut c_char,
 ) -> i32 {
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        fsengine::diagnose_container(
+        fsengine::probe_access(
             pairing_path,
             bundle_id,
             container_path,
@@ -337,7 +337,7 @@ pub unsafe extern "C" fn al_diagnose_container(
         Ok(rc) => rc,
         Err(e) => {
             if !out_error.is_null() {
-                *out_error = ffi_util::cstr(format!("Rust panic in al_diagnose_container: {e:?}"));
+                *out_error = ffi_util::cstr(format!("Rust panic in al_probe_access: {e:?}"));
             }
             1
         }

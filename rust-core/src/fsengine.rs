@@ -2900,12 +2900,13 @@ async fn export_leftover_async(
 }
 
 // ---------------------------------------------------------------------------
-// FFI: diagnostics
+// FFI: access probe (runs automatically, read-only + one reversible write test)
 // ---------------------------------------------------------------------------
 
-/// Runs a battery of read-only probes against one container and returns a
-/// human-readable report. Nothing is modified.
-pub unsafe fn diagnose_container(
+/// Works out what iOS will actually let us do with this container and returns a
+/// one-line verdict plus the evidence. No button, no report screen — Swift calls
+/// this when a container is opened and logs the answer.
+pub unsafe fn probe_access(
     pairing_path: *const c_char,
     bundle_id: *const c_char,
     container_path: *const c_char,
@@ -2928,12 +2929,12 @@ pub unsafe fn diagnose_container(
         return 1;
     }
 
-    let res = crate::ffi_util::run_with_large_stack("al_diagnose_container", move || {
+    let res = crate::ffi_util::run_with_large_stack("al_probe_access", move || {
         let logger = Logger {
             cb: log_cb,
             ctx: ctx_usize as *mut c_void,
         };
-        idevice_ffi::run_sync_local(diagnose_async(
+        idevice_ffi::run_sync_local(probe_access_async(
             pairing_path.clone(),
             bundle_id.clone(),
             container_path.clone(),
@@ -2964,7 +2965,7 @@ pub unsafe fn diagnose_container(
     }
 }
 
-async fn diagnose_async(
+async fn probe_access_async(
     pairing_path: String,
     bundle_id: String,
     container_path: String,
@@ -2973,243 +2974,89 @@ async fn diagnose_async(
 ) -> Result<String, String> {
     let pairing_bytes = read_pairing(&pairing_path)?;
     let mut tunnel = exploit::connect_tunnel(&pairing_bytes, logger).await?;
-    let mut report = serde_json::Map::new();
-    report.insert("container".into(), json!(container_path));
-    report.insert("bundleId".into(), json!(bundle_id));
-    report.insert("riskyMovesEnabled".into(), json!(risky_moves_allowed()));
+    let mut evidence: Vec<String> = Vec::new();
 
-    // 1. HouseArrest, both vend modes.
+    // 1. HouseArrest (dev-signed / file-sharing apps).
     if !bundle_id.is_empty() {
-        for (label, command) in [
-            ("VendContainer", "VendContainer"),
-            ("VendDocuments", "VendDocuments"),
-        ] {
-            let result = try_vend(&mut tunnel, &bundle_id, command, logger).await;
-            match result {
+        for command in ["VendContainer", "VendDocuments"] {
+            match try_vend(&mut tunnel, &bundle_id, command, logger).await {
                 Ok(mut afc) => {
-                    let names = afc.list_dir(".").await.map(|n| n.len()).unwrap_or(0);
-                    report.insert(
-                        format!("houseArrest.{label}"),
-                        json!({"ok": true, "rootEntries": names}),
-                    );
+                    let entries = afc.list_dir(".").await.map(|v| v.len()).unwrap_or(0);
+                    evidence.push(format!(
+                        "house_arrest {command}: granted ({entries} entries)"
+                    ));
+                    return Ok(verdict("full", &evidence));
                 }
-                Err(e) => {
-                    report.insert(
-                        format!("houseArrest.{label}"),
-                        json!({"ok": false, "error": e}),
-                    );
-                }
+                Err(e) => evidence.push(format!("house_arrest {command}: {e}")),
             }
         }
     } else {
-        report.insert(
-            "houseArrest".into(),
-            json!({"ok": false, "error": "no bundle id supplied for this container"}),
-        );
+        evidence.push("house_arrest: no bundle id for this container".into());
     }
 
-    // 2. AFC through the bridge.
+    // 2. Direct AFC through the bridge.
     let mut afc = tunnel.connect_afc(logger).await?;
-    let bridge_report = match afc.get_file_info(&bridge).await {
-        Ok(info) => json!({
-            "ok": true,
-            "isLink": info.st_ifmt.contains("LNK"),
-            "target": info.st_link_target,
-        }),
-        Err(e) => json!({"ok": false, "error": format!("{e:?}")}),
-    };
-    report.insert(format!("bridge[{bridge}]"), bridge_report);
-
-    if let Some(target) = afc
-        .get_file_info(&bridge)
+    let bridge_ok = bridge_matches(&mut afc, &bridge, &container_path)
         .await
-        .ok()
-        .and_then(|i| i.st_link_target.clone())
+        .is_ok();
+    evidence.push(format!("bridge resolves to the container: {bridge_ok}"));
+
+    let (listed, list_err) = list_dir_variants(&mut afc, &bridge).await;
+    if let Some(names) = listed {
+        evidence.push(format!("direct listing: {} entries", names.len()));
+        return Ok(verdict("bridge", &evidence));
+    }
+    evidence.push(format!("direct listing: {list_err}"));
+
+    let stat = afc.get_file_info(&format!("{bridge}/.")).await;
+    evidence.push(format!(
+        "direct stat: {}",
+        match stat {
+            Ok(_) => "ok".to_string(),
+            Err(e) => format!("{e:?}"),
+        }
+    ));
+
+    // 3. The one thing AirLift is documented to do here: write a NEW file in.
+    //    A tiny payload is moved through the bridge and then removed again.
+    let token = exploit::random_hex(6);
+    let probe_name = format!("readipa-probe-{token}.txt");
+    let media_probe = format!("readipa-probe-{token}");
+    let payload = b"readipa probe\n";
     {
-        let resolved = resolve_link_target("/var/mobile/Media", &target);
-        report.insert(
-            "bridgeTargetResolved".into(),
-            json!({
-                "resolved": resolved,
-                "matchesContainer": resolved == normalize_path(&container_path),
-            }),
-        );
+        let mut fd = afc
+            .open(&media_probe, AfcFopenMode::WrOnly)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        let _ = fd.write_entire(payload).await;
+        let _ = fd.close().await;
     }
-
-    // 3. Per-path probes through the bridge.
-    let mut probes = serde_json::Map::new();
-    for sub in [
-        "",
-        ".",
-        "Library",
-        "Documents",
-        "tmp",
-        "Library/Caches",
-        "Library/Preferences",
-    ] {
-        let path = if sub.is_empty() {
-            bridge.clone()
-        } else {
-            format!("{bridge}/{sub}")
-        };
-        let stat = match afc.get_file_info(&path).await {
-            Ok(info) => json!(info.st_ifmt),
-            Err(e) => json!(format!("ERR {e:?}")),
-        };
-        let (listed, list_err) = list_dir_variants(&mut afc, &path).await;
-        probes.insert(
-            sub.to_string(),
-            json!({
-                "stat": stat,
-                "list": match listed { Some(n) => json!(format!("{} entries", n.len())), None => json!(format!("ERR {list_err}")) },
-            }),
-        );
-    }
-    report.insert("bridgeProbes".into(), serde_json::Value::Object(probes));
-
-    // 4. Can we read a known small file?
-    let metadata = ".com.apple.mobile_container_manager.metadata.plist";
-    let (read_ok, read_err) = match afc.open(metadata, AfcFopenMode::RdOnly).await {
-        Ok(mut fd) => {
-            let r = fd.read_entire().await;
-            let _ = fd.close().await;
-            match r {
-                Ok(d) => (true, format!("{} bytes", d.len())),
-                Err(e) => (false, format!("{e:?}")),
-            }
-        }
-        Err(e) => (false, format!("{e:?}")),
-    };
-    report.insert(
-        "containerMetadataReadable".into(),
-        json!({"ok": read_ok, "detail": read_err}),
-    );
-
-    // 4b. Other AFC-rooted services: do any of them expose a wider root?
-    let mut services = serde_json::Map::new();
-    for service in [
-        "com.apple.afc",
-        "com.apple.crashreportcopymobile",
-        "com.apple.mobile.house_arrest",
-    ] {
-        match tunnel.connect_service(service, logger).await {
-            Ok(stream) => {
-                let mut candidate = AfcClient::new(idevice::Idevice::new(stream, "probe"));
-                let dot = candidate.list_dir(".").await;
-                let dotdot = candidate.list_dir("..").await;
-                let escape = candidate
-                    .get_file_info("../../Containers/Data/Application")
-                    .await;
-                services.insert(
-                    service.to_string(),
-                    json!({
-                        "connected": true,
-                        "rootEntries": dot.as_ref().map(|v| v.len()).unwrap_or(0),
-                        "rootListError": dot.err().map(|e| format!("{e:?}")),
-                        "parentListError": dotdot.err().map(|e| format!("{e:?}")),
-                        "escapeStat": match escape {
-                            Ok(i) => format!("{}", i.st_ifmt),
-                            Err(e) => format!("{e:?}"),
-                        },
-                    }),
-                );
-            }
-            Err(e) => {
-                services.insert(service.to_string(), json!({"connected": false, "error": e}));
-            }
-        }
-    }
-    report.insert("afcServices".into(), serde_json::Value::Object(services));
-
-    // 5. Relocation probes — this is what decides whether AirTraffic can give
-    //    us "eyes". A rename needs write permission on the entry's PARENT, so
-    //    the container root (parent = .../Data/Application, confirmed writable)
-    //    should move, while a nested entry (parent = <UUID>) should not.
-    if risky_moves_allowed() {
-        let dst_back = bridge.clone();
-
-        // 5a. The container root: one move exposes the WHOLE tree to AFC.
-        let token = exploit::random_hex(6);
-        let staging = format!("readipa-diag-{token}");
-        match move_path(&mut tunnel, &mut afc, &container_path, &staging, logger).await {
-            Ok(()) => {
-                let top = afc.list_dir(&staging).await;
-                let mut listing: Vec<String> = Vec::new();
-                if let Ok(names) = &top {
-                    for n in names.iter().take(60) {
-                        if n == "." || n == ".." {
-                            continue;
-                        }
-                        let kind = afc
-                            .get_file_info(&format!("{staging}/{n}"))
-                            .await
-                            .map(|i| i.st_ifmt.clone())
-                            .unwrap_or_else(|_| "?".into());
-                        listing.push(format!("{n} ({kind})"));
-                    }
-                }
-                report.insert(
-                    "rootMove".into(),
-                    json!({
-                        "ok": true,
-                        "listingWorks": top.is_ok(),
-                        "entries": listing,
-                        "listError": top.err().map(|e| format!("{e:?}")),
-                    }),
-                );
-                match restore_staged_dir(&mut tunnel, &mut afc, &staging, &dst_back, logger).await {
-                    Ok(()) => {
-                        report.insert("rootMoveRestored".into(), json!(true));
-                    }
-                    Err(e) => {
-                        report.insert(
-                            "rootMoveRestored".into(),
-                            json!({"ok": false, "error": e, "keptAt": format!("{MEDIA_ROOT}{staging}")}),
-                        );
-                    }
-                }
-            }
-            Err(e) => {
-                report.insert("rootMove".into(), json!({"ok": false, "error": e}));
-            }
-        }
-
-        // 5b. A nested entry, for contrast: its parent is the container itself.
-        let token2 = exploit::random_hex(6);
-        let staging2 = format!("readipa-diag-{token2}");
-        let meta_abs = format!("{}/{}", container_path.trim_end_matches('/'), metadata);
-        match move_path(&mut tunnel, &mut afc, &meta_abs, &staging2, logger).await {
-            Ok(()) => {
-                report.insert("nestedMove".into(), json!({"ok": true}));
-                let _ =
-                    restore_staged_dir(&mut tunnel, &mut afc, &staging2, &dst_back, logger).await;
-            }
-            Err(e) => {
-                report.insert("nestedMove".into(), json!({"ok": false, "error": e}));
-            }
-        }
-    }
-
-    Ok(
-        serde_json::to_string_pretty(&serde_json::Value::Object(report))
-            .map_err(|e| e.to_string())?,
+    let dst = format!("{}/{}", bridge.trim_end_matches('/'), probe_name);
+    match move_path(
+        &mut tunnel,
+        &mut afc,
+        &format!("{MEDIA_ROOT}{media_probe}"),
+        &dst,
+        logger,
     )
+    .await
+    {
+        Ok(()) => {
+            evidence.push("write probe: a new file landed inside the container".into());
+        }
+        Err(e) => {
+            evidence.push(format!("write probe: {e}"));
+        }
+    }
+    let _ = afc.remove(&media_probe).await;
+
+    Ok(verdict("none", &evidence))
 }
 
-async fn try_vend(
-    tunnel: &mut AppDeviceTunnel,
-    bundle_id: &str,
-    command: &str,
-    logger: &Logger,
-) -> Result<AfcClient, String> {
-    let stream = tunnel
-        .connect_service("com.apple.mobile.house_arrest", logger)
-        .await?;
-    let client = HouseArrestClient::new(idevice::Idevice::new(stream, "Airlift"));
-    let result = if command == "VendDocuments" {
-        client.vend_documents(bundle_id.to_string()).await
-    } else {
-        client.vend_container(bundle_id.to_string()).await
-    };
-    result.map_err(|e| format!("{e:?}"))
+fn verdict(level: &str, evidence: &[String]) -> String {
+    serde_json::to_string_pretty(&json!({
+        "access": level,
+        "evidence": evidence,
+    }))
+    .unwrap_or_else(|_| format!("{{\"access\":\"{level}\"}}"))
 }

@@ -31,7 +31,6 @@ struct BrowserView: View {
             .sheet(isPresented: $showNewFolder) { newFolderSheet }
             .sheet(isPresented: $showRename) { renameSheet }
             .sheet(isPresented: $state.showPreview) { previewSheet }
-            .sheet(isPresented: $state.showDiagnosis) { diagnosisSheet }
             .fileImporter(
                 isPresented: $showImporter,
                 allowedContentTypes: [.data],
@@ -97,16 +96,14 @@ struct BrowserView: View {
 
     @ViewBuilder
     private var modeBanner: some View {
-        if state.bridgeRequiresRiskyMoves && !state.allowRiskyMoves {
+        if state.containerAccess == "none" {
             banner(
-                state.bridgeMode == "bridge_readonly"
-                    ? "Folder listing needs “Allow risky moves” in Setup. Direct reads already work, "
-                      + "so Save and ZIP export never touch the app."
-                    : "This container blocks direct access. Enable “Allow risky moves” in Setup to list it "
-                      + "(the folder is moved to Media temporarily).",
-                color: .orange
+                "iOS refuses access to this container. Only apps that are sideloaded "
+                + "(get-task-allow) or that enable file sharing can be opened — this is a limit of "
+                + "the operating system, not of Readipa. See the Logs tab for the probe result.",
+                color: .red
             )
-        } else if state.bridgeMode == "bridge_move" {
+        } else if state.bridgeRequiresRiskyMoves && !state.allowRiskyMoves {
             banner(
                 "AirLift mode: each operation moves the file through Media and back (15–30 s). "
                 + "Every step is verified — if one cannot finish you will see exactly where the file is kept.",
@@ -369,30 +366,6 @@ struct BrowserView: View {
             }
         }
         .presentationDetents([.height(220)])
-    }
-
-    private var diagnosisSheet: some View {
-        NavigationView {
-            ScrollView {
-                Text(state.diagnosisText ?? "")
-                    .font(.system(.caption2, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-            }
-            .navigationTitle("Diagnosis")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(lang("done")) { state.showDiagnosis = false }
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button { state.shareDiagnosis() } label: {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                }
-            }
-        }
     }
 
     private var previewSheet: some View {
