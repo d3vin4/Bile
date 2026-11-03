@@ -1283,6 +1283,26 @@ impl Engine {
     }
 }
 
+/// Ask house_arrest to vend a container. `VendDocuments` works for apps that
+/// enable file sharing; `VendContainer` needs get-task-allow.
+async fn try_vend(
+    tunnel: &mut AppDeviceTunnel,
+    bundle_id: &str,
+    command: &str,
+    logger: &Logger,
+) -> Result<AfcClient, String> {
+    let stream = tunnel
+        .connect_service("com.apple.mobile.house_arrest", logger)
+        .await?;
+    let client = HouseArrestClient::new(idevice::Idevice::new(stream, "Airlift"));
+    let result = if command == "VendDocuments" {
+        client.vend_documents(bundle_id.to_string()).await
+    } else {
+        client.vend_container(bundle_id.to_string()).await
+    };
+    result.map_err(|e| format!("{e:?}"))
+}
+
 pub(crate) async fn open_engine(
     pairing_path: &str,
     bundle_id: &str,
@@ -2992,6 +3012,33 @@ async fn probe_access_async(
         }
     } else {
         evidence.push("house_arrest: no bundle id for this container".into());
+    }
+
+    // 1b. iOS 27's second-generation house-arrest service (the one 3105 uses).
+    for service in [
+        "com.apple.mobile.MobileHouseArrest",
+        "com.apple.mobile.MobileHouseArrest.patch-keys",
+    ] {
+        match tunnel.connect_service(service, logger).await {
+            Ok(mut stream) => {
+                use tokio::io::AsyncReadExt;
+                let mut buf = [0u8; 512];
+                let first =
+                    tokio::time::timeout(std::time::Duration::from_secs(2), stream.read(&mut buf))
+                        .await;
+                match first {
+                    Ok(Ok(n)) => {
+                        let preview = String::from_utf8_lossy(&buf[..n]).to_string();
+                        evidence.push(format!("{service}: connected, device said: {preview:?}"));
+                    }
+                    Ok(Err(e)) => evidence.push(format!("{service}: connected, read error: {e:?}")),
+                    Err(_) => {
+                        evidence.push(format!("{service}: connected, no greeting (silent accept)"))
+                    }
+                }
+            }
+            Err(e) => evidence.push(format!("{service}: {e}")),
+        }
     }
 
     // 2. Direct AFC through the bridge.
