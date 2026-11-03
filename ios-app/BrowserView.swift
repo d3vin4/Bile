@@ -314,14 +314,6 @@ struct BrowserView: View {
                     Image(systemName: "square.and.arrow.down.on.square")
                 }
                 .disabled(state.isExporting)
-                Button { state.diagnose() } label: {
-                    if state.isDiagnosing {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "stethoscope")
-                    }
-                }
-                .disabled(state.isDiagnosing)
                 Button { showNewFolder = true } label: { Image(systemName: "folder.badge.plus") }
                 Button { showImporter = true } label: { Image(systemName: "square.and.arrow.down") }
             }
