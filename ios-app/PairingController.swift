@@ -129,8 +129,8 @@ final class PairingController: ObservableObject {
         updatePairingActivity(
             status: t("Waiting for Settings › Developer Mode…", "Đang chờ vào Cài đặt › Developer Mode…"),
             alert: AlertConfiguration(
-                title: t("Readipa is pairing", "Readipa đang ghép đôi"),
-                body: t(
+                title: ls("Readipa is pairing", "Readipa đang ghép đôi"),
+                body: ls(
                     "The code to type into Settings appears here.",
                     "Mã PIN để nhập vào Cài đặt sẽ hiện ở đây."
                 ),
@@ -266,8 +266,8 @@ final class PairingController: ObservableObject {
                 "Nhập mã PIN này trong Cài đặt › Developer Mode"
             ),
             alert: AlertConfiguration(
-                title: t("Readipa PIN \(pin)", "Readipa mã PIN \(pin)"),
-                body: t(
+                title: ls("Readipa PIN \(pin)", "Readipa mã PIN \(pin)"),
+                body: ls(
                     "Type this code into Settings › Privacy & Security › Developer Mode",
                     "Nhập mã này trong Cài đặt › Quyền riêng tư & Bảo mật › Developer Mode"
                 ),
@@ -286,6 +286,12 @@ final class PairingController: ObservableObject {
     /// (which runs in its own process) can follow the in-app picker.
     private var vietnamese: Bool { LanguageManager.shared.language == .vietnamese }
     private func t(_ en: String, _ viText: String) -> String { vietnamese ? viText : en }
+
+    /// `AlertConfiguration` wants a `LocalizedStringResource`; the in-app picker
+    /// already chose the text, so use it verbatim.
+    private func ls(_ en: String, _ viText: String) -> LocalizedStringResource {
+        LocalizedStringResource(stringLiteral: t(en, viText))
+    }
 
     /// Requests the Live Activity. Safe to call twice — the second call updates
     /// the existing one instead of creating another.
@@ -361,11 +367,11 @@ final class PairingController: ObservableObject {
         )
         let alert = AlertConfiguration(
             title: success
-                ? t("Readipa: paired", "Readipa: đã ghép đôi")
-                : t("Readipa: pairing failed", "Readipa: ghép đôi thất bại"),
+                ? ls("Readipa: paired", "Readipa: đã ghép đôi")
+                : ls("Readipa: pairing failed", "Readipa: ghép đôi thất bại"),
             body: success
-                ? t("The device paired successfully.", "Thiết bị đã ghép đôi thành công.")
-                : t("Open Readipa to see the error.", "Mở Readipa để xem lỗi."),
+                ? ls("The device paired successfully.", "Thiết bị đã ghép đôi thành công.")
+                : ls("Open Readipa to see the error.", "Mở Readipa để xem lỗi."),
             sound: .default
         )
         Task {
