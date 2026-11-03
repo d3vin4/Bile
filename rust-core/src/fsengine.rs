@@ -1602,42 +1602,48 @@ async fn fs_list_async(
     )
 }
 
-/// Move the container into Media, run `body` against it there, then always move
-/// it back.
+/// Move the container into Media so AFC can read and modify the whole tree.
 ///
-/// This is the core of the AirTraffic strategy: a rename needs write permission
-/// on the entry's *parent*, and only `.../Data/Application` (the container's
-/// parent) is writable — never `<UUID>` itself. Moving the root therefore works
-/// while moving anything nested does not, and once the root is in Media **AFC
-/// can read and modify the whole tree**, so a single move gives both eyes and
-/// hands.
-pub(crate) async fn with_container_staged<F, Fut, T>(
+/// A rename needs write permission on the entry's *parent*, and iOS only lets
+/// AirTraffic write inside `.../Data/Application` (the container's parent) — never
+/// inside `<UUID>` itself. Moving the root therefore works while moving nested
+/// folders never does, and one root move gives both eyes and hands.
+pub(crate) async fn stage_container(
     tunnel: &mut AppDeviceTunnel,
     afc: &mut AfcClient,
     container_path: &str,
-    dst_back: &str,
     logger: &Logger,
-    body: F,
-) -> Result<T, String>
-where
-    F: FnOnce(&mut AfcClient, String) -> Fut,
-    Fut: std::future::Future<Output = Result<T, String>>,
-{
+) -> Result<String, String> {
     let token = exploit::random_hex(8);
     let staging = format!("readipa-mount-{token}");
-
     move_path(tunnel, afc, container_path, &staging, logger)
         .await
         .map_err(|e| {
             format!(
-                "could not move the container into Media ({e}). Nothing was changed — open \
+                "could not move the container into Media ({e}). Nothing was changed — run \
                  Diagnose to see whether AirTraffic can reach this container at all."
             )
         })?;
+    Ok(staging)
+}
 
-    let outcome = body(afc, staging.clone()).await;
+/// Put a staged container back, always reporting what happened.
+pub(crate) async fn unstage_container(
+    tunnel: &mut AppDeviceTunnel,
+    afc: &mut AfcClient,
+    staging: &str,
+    dst_back: &str,
+    logger: &Logger,
+) -> Result<(), String> {
+    restore_staged_dir(tunnel, afc, staging, dst_back, logger).await
+}
 
-    let restore = restore_staged_dir(tunnel, afc, &staging, dst_back, logger).await;
+/// Combines an operation result with the restore result into one message.
+pub(crate) fn staged_outcome<T>(
+    outcome: Result<T, String>,
+    restore: Result<(), String>,
+    staging: &str,
+) -> Result<T, String> {
     match (outcome, restore) {
         (Ok(value), Ok(())) => Ok(value),
         (Err(e), Ok(())) => Err(e),
@@ -2052,39 +2058,27 @@ async fn fs_write_async(
 
     // Stage the container once, then write the file straight into it with AFC.
     let dst_back = engine.path("");
-    let container = container_path.clone();
-    let local_src = src_local_path.clone();
-    let rel = rel_path.clone();
-    let afc_ref = &mut engine.afc;
-    with_container_staged(
-        &mut tunnel,
-        afc_ref,
-        &container,
-        &dst_back,
-        logger,
-        move |afc, staging| {
-            let target = format!("{}/{}", staging.trim_end_matches('/'), rel);
-            let local = local_src.clone();
-            async move {
-                if let Some(parent) = target.rsplit_once('/') {
-                    let _ = afc.mk_dir(parent.0).await;
-                }
-                if let Ok(info) = afc.get_file_info(&target).await {
-                    if info.st_ifmt.contains("DIR") {
-                        return Err("A folder already exists at that name".into());
-                    }
-                }
-                let mut fd = afc
-                    .open(&target, AfcFopenMode::WrOnly)
-                    .await
-                    .map_err(|e| format!("{e:?}"))?;
-                let r = stream_local_to_afc(&local, &mut fd).await;
-                let _ = fd.close().await;
-                r.map(|_| ())
+    let staging = stage_container(&mut tunnel, &mut engine.afc, &container_path, logger).await?;
+    let target = format!("{}/{}", staging.trim_end_matches('/'), rel_path);
+    let outcome = async {
+        if let Ok(info) = engine.afc.get_file_info(&target).await {
+            if info.st_ifmt.contains("DIR") {
+                return Err("A folder already exists at that name".to_string());
             }
-        },
-    )
-    .await
+        }
+        let mut fd = engine
+            .afc
+            .open(&target, AfcFopenMode::WrOnly)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        let r = stream_local_to_afc(&src_local_path, &mut fd).await;
+        let _ = fd.close().await;
+        r.map(|_| ())
+    }
+    .await;
+    let restore =
+        unstage_container(&mut tunnel, &mut engine.afc, &staging, &dst_back, logger).await;
+    staged_outcome(outcome, restore, &staging)
 }
 
 // ---------------------------------------------------------------------------
@@ -2169,21 +2163,16 @@ async fn fs_mkdir_async(
     }
 
     let dst_back = engine.path("");
-    let container = container_path.clone();
-    let rel = rel_path.clone();
-    let afc_ref = &mut engine.afc;
-    with_container_staged(
-        &mut tunnel,
-        afc_ref,
-        &container,
-        &dst_back,
-        logger,
-        move |afc, staging| {
-            let target = format!("{}/{}", staging.trim_end_matches('/'), rel);
-            async move { afc.mk_dir(&target).await.map_err(|e| format!("{e:?}")) }
-        },
-    )
-    .await
+    let staging = stage_container(&mut tunnel, &mut engine.afc, &container_path, logger).await?;
+    let target = format!("{}/{}", staging.trim_end_matches('/'), rel_path);
+    let outcome = engine
+        .afc
+        .mk_dir(&target)
+        .await
+        .map_err(|e| format!("{e:?}"));
+    let restore =
+        unstage_container(&mut tunnel, &mut engine.afc, &staging, &dst_back, logger).await;
+    staged_outcome(outcome, restore, &staging)
 }
 
 // ---------------------------------------------------------------------------
@@ -2264,21 +2253,12 @@ async fn fs_remove_async(
     }
 
     let dst_back = engine.path("");
-    let container = container_path.clone();
-    let rel = rel_path.clone();
-    let afc_ref = &mut engine.afc;
-    with_container_staged(
-        &mut tunnel,
-        afc_ref,
-        &container,
-        &dst_back,
-        logger,
-        move |afc, staging| {
-            let target = format!("{}/{}", staging.trim_end_matches('/'), rel);
-            async move { remove_tree_safe(afc, &target).await }
-        },
-    )
-    .await
+    let staging = stage_container(&mut tunnel, &mut engine.afc, &container_path, logger).await?;
+    let target = format!("{}/{}", staging.trim_end_matches('/'), rel_path);
+    let outcome = remove_tree_safe(&mut engine.afc, &target).await;
+    let restore =
+        unstage_container(&mut tunnel, &mut engine.afc, &staging, &dst_back, logger).await;
+    staged_outcome(outcome, restore, &staging)
 }
 
 // ---------------------------------------------------------------------------
@@ -2377,29 +2357,24 @@ async fn fs_rename_async(
     }
 
     let dst_back = engine.path("");
-    let container = container_path.clone();
-    let old = old_rel.clone();
-    let newrel = new_rel.clone();
-    let afc_ref = &mut engine.afc;
-    with_container_staged(
-        &mut tunnel,
-        afc_ref,
-        &container,
-        &dst_back,
-        logger,
-        move |afc, staging| {
-            let from = format!("{}/{}", staging.trim_end_matches('/'), old);
-            let to = format!("{}/{}", staging.trim_end_matches('/'), newrel);
-            async move {
-                // Never clobber: a shadowed destination would be silent data loss.
-                if afc.get_file_info(&to).await.is_ok() {
-                    return Err("A file or folder with that name already exists".to_string());
-                }
-                afc.rename(&from, &to).await.map_err(|e| format!("{e:?}"))
-            }
-        },
-    )
-    .await
+    let staging = stage_container(&mut tunnel, &mut engine.afc, &container_path, logger).await?;
+    let from = format!("{}/{}", staging.trim_end_matches('/'), old_rel);
+    let to = format!("{}/{}", staging.trim_end_matches('/'), new_rel);
+    let outcome = async {
+        // Never clobber: a shadowed destination would be silent data loss.
+        if engine.afc.get_file_info(&to).await.is_ok() {
+            return Err("A file or folder with that name already exists".to_string());
+        }
+        engine
+            .afc
+            .rename(&from, &to)
+            .await
+            .map_err(|e| format!("{e:?}"))
+    }
+    .await;
+    let restore =
+        unstage_container(&mut tunnel, &mut engine.afc, &staging, &dst_back, logger).await;
+    staged_outcome(outcome, restore, &staging)
 }
 
 // ---------------------------------------------------------------------------
