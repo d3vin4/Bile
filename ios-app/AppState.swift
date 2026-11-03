@@ -112,6 +112,49 @@ final class AppState: ObservableObject {
         apps.filter(\.getTaskAllow).sorted { $0.name < $1.name }
     }
 
+    @Published var backupBusy: String? = nil
+
+    /// The last resort when nothing else can read the container: ask the
+    /// device's own backup service to stream the app's domain to us, then zip
+    /// that directory and hand it to the share sheet.
+    func backupAppData(_ app: AppEntry, timeout: UInt32 = 600) {
+        backupBusy = app.bundleId
+        let stamp = ISO8601DateFormatter().string(from: Date()).prefix(10)
+        let safe = app.name.replacingOccurrences(of: "/", with: "-")
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Backups/\(safe)-\(stamp)", isDirectory: true)
+        let zip = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(safe)-backup-\(stamp).zip")
+        logLine("Requesting a backup of \(app.bundleId)… (this can take a while)")
+        Task {
+            do {
+                let report = try RustBridge.backupApp(
+                    pairingPath: pairingPath,
+                    bundleId: app.bundleId,
+                    destDir: dir.path,
+                    timeoutSecs: timeout
+                )
+                let files = (report["files"] as? Int) ?? 0
+                let bytes = (report["bytes"] as? Int) ?? 0
+                await MainActor.run {
+                    logLine("Backup received: \(files) file(s), \(FileEntry.prettySize(bytes)) — zipping…")
+                }
+                try RustBridge.zipLocalDir(sourceDir: dir.path, destZipPath: zip.path)
+                await MainActor.run {
+                    backupBusy = nil
+                    exportedFileURL = zip
+                    showShareSheet = true
+                    logLine("Backup ZIP ready ✅ — use Save to Files")
+                }
+            } catch {
+                await MainActor.run {
+                    backupBusy = nil
+                    logLine("Backup failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     func enableJIT(_ app: AppEntry) {
         jitBusy = app.bundleId
         logLine("Enabling JIT for \(app.name)…")

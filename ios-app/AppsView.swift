@@ -307,6 +307,26 @@ struct AppDetailView: View {
                 HStack { Text(lang("type")); Spacer(); Text(app.type).foregroundStyle(.secondary) }
             }
 
+            Section {
+                Button {
+                    state.backupAppData(app)
+                } label: {
+                    if state.backupBusy == app.bundleId {
+                        HStack(spacing: 8) { ProgressView(); Text("Backing up…") }
+                    } else {
+                        Label("Download all data (backup)", systemImage: "arrow.down.circle")
+                    }
+                }
+                .disabled(state.backupBusy != nil)
+                Text("Uses the device's own backup service to stream this app's data to Readipa, "
+                     + "then zips it for Save to Files. It is the only route that works for apps "
+                     + "where iOS blocks direct access — and it never changes anything on the device.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Export")
+            }
+
             Section(lang("data.container")) {
                 if app.dataContainer.isEmpty {
                     Text(lang("no.container")).font(.caption).foregroundStyle(.secondary)

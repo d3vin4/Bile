@@ -168,6 +168,22 @@ void al_clear_target_hosts(void);
 // Container catalog & file system (Application Containers + App Groups)
 // ---------------------------------------------------------------------------
 
+// Zip an on-device directory (used to package a finished backup).
+int32_t al_zip_local_dir(const char *source_dir,
+                         const char *dest_zip_path,
+                         char **out_error);
+
+// Pull an app's data through the device backup service into dest_dir.
+// Read-only: the device streams the backup, nothing is modified.
+int32_t al_backup_app(const char *pairing_path,
+                      const char *bundle_id,
+                      const char *dest_dir,
+                      uint32_t timeout_secs,
+                      ALLogCallback log_cb,
+                      void *ctx,
+                      char **out_json,
+                      char **out_error);
+
 // Enable JIT for a sideloaded app (requires get-task-allow).
 int32_t al_jit_enable(const char *pairing_path,
                       const char *bundle_id,

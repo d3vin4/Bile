@@ -79,6 +79,49 @@ enum RustBridge {
         free(outErr)
     }
 
+    static func backupApp(
+        pairingPath: String,
+        bundleId: String,
+        destDir: String,
+        timeoutSecs: UInt32 = 600
+    ) throws -> [String: Any] {
+        var outJson: UnsafeMutablePointer<CChar>?
+        var outErr: UnsafeMutablePointer<CChar>?
+        let rc = withCString(pairingPath) { pp in
+            withCString(bundleId) { bp in
+                withCString(destDir) { dp in
+                    al_backup_app(pp, bp, dp, timeoutSecs, logCallback, nil, &outJson, &outErr)
+                }
+            }
+        }
+        defer { free(outJson); free(outErr) }
+        if rc != 0 {
+            let msg = outErr.map { String(cString: $0) } ?? "backup failed"
+            throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        guard let json = outJson.map({ String(cString: $0) }),
+              let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return obj
+    }
+
+    static func zipLocalDir(sourceDir: String, destZipPath: String) throws {
+        var outErr: UnsafeMutablePointer<CChar>?
+        let rc = withCString(sourceDir) { sp in
+            withCString(destZipPath) { dp in
+                al_zip_local_dir(sp, dp, &outErr)
+            }
+        }
+        if rc != 0 {
+            let msg = outErr.map { String(cString: $0) } ?? "zip failed"
+            free(outErr)
+            throw NSError(domain: "Rust", code: Int(rc), userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        free(outErr)
+    }
+
     static func enableJIT(pairingPath: String, bundleId: String) throws -> [String: Any] {
         var outJson: UnsafeMutablePointer<CChar>?
         var outErr: UnsafeMutablePointer<CChar>?

@@ -129,6 +129,21 @@ pub(crate) fn read_pairing(pairing_path: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Failed to read pairing file at {pairing_path}: {e}"))
 }
 
+pub(crate) fn human_bytes(bytes: u64) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut index = 0;
+    while value >= 1024.0 && index < units.len() - 1 {
+        value /= 1024.0;
+        index += 1;
+    }
+    if index == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", units[index])
+    }
+}
+
 fn entry_json(name: &str, info: &idevice::afc::FileInfo) -> serde_json::Value {
     json!({
         "name": name,

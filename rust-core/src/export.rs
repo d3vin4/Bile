@@ -444,3 +444,86 @@ async fn export_async(
     }))
     .map_err(|e| e.to_string())?)
 }
+
+// ---------------------------------------------------------------------------
+// Local directory -> ZIP (used to package a finished backup)
+// ---------------------------------------------------------------------------
+
+pub unsafe fn zip_local_dir(
+    source_dir: *const c_char,
+    dest_zip_path: *const c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let source_dir = opt_str(source_dir, "");
+    let dest_zip_path = opt_str(dest_zip_path, "");
+    if source_dir.is_empty() || dest_zip_path.is_empty() {
+        if !out_error.is_null() {
+            *out_error = cstr("source_dir and dest_zip_path are required");
+        }
+        return 1;
+    }
+
+    let res = crate::ffi_util::run_with_large_stack("al_zip_local_dir", move || {
+        zip_local_impl(&source_dir, &dest_zip_path)
+    });
+
+    match res {
+        Ok(Ok(())) => 0,
+        Ok(Err(e)) => {
+            if !out_error.is_null() {
+                *out_error = cstr(e);
+            }
+            1
+        }
+        Err(p) => {
+            if !out_error.is_null() {
+                *out_error = cstr(p);
+            }
+            1
+        }
+    }
+}
+
+fn zip_local_impl(source_dir: &str, dest_zip_path: &str) -> Result<(), String> {
+    let root = std::path::Path::new(source_dir);
+    if !root.is_dir() {
+        return Err(format!("{source_dir} is not a directory"));
+    }
+    if let Some(parent) = std::path::Path::new(dest_zip_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let file = std::fs::File::create(dest_zip_path)
+        .map_err(|e| format!("cannot create {dest_zip_path}: {e}"))?;
+    let mut exporter = Exporter::new(file);
+
+    let mut stack: Vec<std::path::PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(rel) = path.strip_prefix(root) else {
+                continue;
+            };
+            let name = rel.to_string_lossy().replace('\\', "/");
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                let _ = exporter.add_dir(&name);
+                stack.push(path);
+            } else if meta.is_file() {
+                let data = match std::fs::read(&path) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+                if exporter.add_bytes(&name, &data).is_ok() {
+                    exporter.files += 1;
+                    exporter.bytes += data.len() as u64;
+                }
+            }
+        }
+    }
+
+    exporter.finish()
+}
