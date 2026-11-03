@@ -38,10 +38,9 @@ struct PairingLiveActivityWidget: Widget {
             .activityBackgroundTint(Color.black.opacity(0.8))
             .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
-            let l = L(context)
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Text(l.t("PIN", "Mã PIN"))
+                    Text(L(context).t("PIN", "Mã PIN"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
