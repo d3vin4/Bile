@@ -616,7 +616,11 @@ async fn atc_file_complete(
     )
     .await?;
 
-    let mut manifest = false;
+    // The device only honours FileComplete for assets **it** announced as
+    // downloadable. Checking that list turns a silent no-op into a precise
+    // answer.
+    let mut offered: Vec<String> = Vec::new();
+    let mut manifest_seen = false;
     for _ in 0..20 {
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -632,7 +636,35 @@ async fn atc_file_complete(
                         continue;
                     }
                     if name == "AssetManifest" {
-                        manifest = true;
+                        manifest_seen = true;
+                        if let Some(params) = dict.get("Params").and_then(|p| p.as_dictionary()) {
+                            if let Some(manifest) =
+                                params.get("AssetManifest").and_then(|m| m.as_dictionary())
+                            {
+                                if let Some(rows) = manifest.get("Book").and_then(|b| b.as_array())
+                                {
+                                    for row in rows {
+                                        if let Some(row) = row.as_dictionary() {
+                                            let id = row
+                                                .get("AssetID")
+                                                .and_then(|v| v.as_string())
+                                                .unwrap_or_default()
+                                                .to_string();
+                                            let is_download = row
+                                                .get("IsDownload")
+                                                .and_then(|v| v.as_boolean())
+                                                .unwrap_or(false);
+                                            logger.log(format!(
+                                                "airlift: device offered '{id}' (IsDownload={is_download})"
+                                            ));
+                                            if is_download {
+                                                offered.push(id);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         break;
                     }
                     if name == "SyncFinished" {
@@ -644,8 +676,18 @@ async fn atc_file_complete(
             Err(_) => {}
         }
     }
-    if !manifest {
+    if !manifest_seen {
         return Err("AirTraffic: AssetManifest not observed".into());
+    }
+    if !offered.iter().any(|id| id == asset_id) {
+        return Err(format!(
+            "the device did not offer '{asset_id}' for download, so it ignored the move. Offered: {}",
+            if offered.is_empty() {
+                "nothing".to_string()
+            } else {
+                offered.join(", ")
+            }
+        ));
     }
 
     let mut params = plist::Dictionary::new();
@@ -1468,27 +1510,44 @@ async fn fs_list_async(
                  Tap “Diagnose” in the Files toolbar to see exactly what is allowed here."
             ));
         }
-        // Relocate the directory out to Media, list it, then put it back.
+        // Relocate the whole CONTAINER once and read from Media.
+        //
+        // A rename needs write permission on the *parent* directory. AirTraffic
+        // can create entries in `/var/mobile/Containers/Data/Application` (the
+        // container's parent) but not inside `<UUID>/…`, so moving the root
+        // works while moving a sub-folder does not. One root move also gives
+        // access to the entire tree, not just the folder being listed.
         let token = exploit::random_hex(8);
-        let staging = format!("readipa-list-{token}");
-        let abs = engine.abs_path(&container_path, &rel_path);
-        let dst_back = engine.path(&rel_path);
+        let staging = format!("readipa-mount-{token}");
+        let dst_back = engine.path("");
+        let inside = |rel: &str| -> String {
+            if rel.is_empty() {
+                staging.clone()
+            } else {
+                format!("{}/{}", staging.trim_end_matches('/'), rel)
+            }
+        };
 
-        move_path(&mut tunnel, &mut engine.afc, &abs, &staging, logger)
-            .await
-            .map_err(|e| {
-                format!(
-                    "Direct listing failed (AFC said: {direct_error}) and the relocation \
-                     fallback also failed ({e}).\nNothing was changed — the folder is exactly \
+        move_path(
+            &mut tunnel,
+            &mut engine.afc,
+            &container_path,
+            &staging,
+            logger,
+        )
+        .await
+        .map_err(|e| {
+            format!(
+                "Direct listing failed (AFC said: {direct_error}) and moving the container \
+                     into Media failed too ({e}).\nNothing was changed — the container is exactly \
                      where it was.\nTap “Diagnose” in the Files toolbar for the full report."
-                )
-            })?;
+            )
+        })?;
 
-        let listed = engine.afc.list_dir(&staging).await;
+        let listed = engine.afc.list_dir(inside(&rel_path)).await;
         let names = match listed {
             Ok(n) => n,
             Err(e) => {
-                // Try hard to put it back before reporting.
                 let _ =
                     restore_staged_dir(&mut tunnel, &mut engine.afc, &staging, &dst_back, logger)
                         .await;
@@ -1496,24 +1555,22 @@ async fn fs_list_async(
             }
         };
 
-        // Stat every entry while it is still at the staging path.
         for n in &names {
             if n == "." || n == ".." {
                 continue;
             }
-            let full = format!("{}/{}", staging.trim_end_matches('/'), n);
+            let full = format!("{}/{}", inside(&rel_path).trim_end_matches('/'), n);
             match engine.afc.get_file_info(&full).await {
                 Ok(info) => entries.push(entry_json(n, &info)),
                 Err(_) => entries.push(json!({"name": n, "isDir": false, "size": 0})),
             }
         }
 
-        // Put it back — retried, and verified. Never silent.
         restore_staged_dir(&mut tunnel, &mut engine.afc, &staging, &dst_back, logger)
             .await
             .map_err(|e| {
                 format!(
-                    "THE DIRECTORY COULD NOT BE RESTORED AUTOMATICALLY: {e}\n\
+                    "THE CONTAINER COULD NOT BE RESTORED AUTOMATICALLY: {e}\n\
                      Your data is safe at /var/mobile/Media/{staging} — use Recovery to move it back."
                 )
             })?;
@@ -1543,6 +1600,56 @@ async fn fs_list_async(
         serde_json::to_string_pretty(&json!({"entries": entries, "bridge": engine.bridge}))
             .map_err(|e| e.to_string())?,
     )
+}
+
+/// Move the container into Media, run `body` against it there, then always move
+/// it back.
+///
+/// This is the core of the AirTraffic strategy: a rename needs write permission
+/// on the entry's *parent*, and only `.../Data/Application` (the container's
+/// parent) is writable — never `<UUID>` itself. Moving the root therefore works
+/// while moving anything nested does not, and once the root is in Media **AFC
+/// can read and modify the whole tree**, so a single move gives both eyes and
+/// hands.
+pub(crate) async fn with_container_staged<F, Fut, T>(
+    tunnel: &mut AppDeviceTunnel,
+    afc: &mut AfcClient,
+    container_path: &str,
+    dst_back: &str,
+    logger: &Logger,
+    body: F,
+) -> Result<T, String>
+where
+    F: FnOnce(&mut AfcClient, String) -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let token = exploit::random_hex(8);
+    let staging = format!("readipa-mount-{token}");
+
+    move_path(tunnel, afc, container_path, &staging, logger)
+        .await
+        .map_err(|e| {
+            format!(
+                "could not move the container into Media ({e}). Nothing was changed — open \
+                 Diagnose to see whether AirTraffic can reach this container at all."
+            )
+        })?;
+
+    let outcome = body(afc, staging.clone()).await;
+
+    let restore = restore_staged_dir(tunnel, afc, &staging, dst_back, logger).await;
+    match (outcome, restore) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(e), Ok(())) => Err(e),
+        (Ok(_), Err(e)) => Err(format!(
+            "the operation finished but the container could not be put back: {e}\n\
+             Everything is safe at /var/mobile/Media/{staging} — use Recovery to restore it."
+        )),
+        (Err(e), Err(re)) => Err(format!(
+            "{e}\nThe container also could not be put back ({re}) and is safe at \
+             /var/mobile/Media/{staging} — use Recovery."
+        )),
+    }
 }
 
 /// Move a Media-staged item back into its container. `dst` must be the
@@ -1796,20 +1903,31 @@ async fn fs_read_async(
         );
     }
 
-    // Move mode: relocate the file out, copy it, then put it back — verified.
+    // Move mode: relocate the whole container once (its parent directory is
+    // writable, a nested folder's is not), read from Media, then put it back.
     let token = exploit::random_hex(8);
-    let staging = format!("readipa-hold-{token}");
-    let abs = engine.abs_path(&container_path, &rel_path);
-    let dst_back = engine.path(&rel_path);
+    let staging = format!("readipa-mount-{token}");
+    let dst_back = engine.path("");
+    let inside = format!(
+        "{}/{}",
+        staging.trim_end_matches('/'),
+        rel_path.trim_start_matches('/')
+    );
 
-    move_path(&mut tunnel, &mut engine.afc, &abs, &staging, logger)
-        .await
-        .map_err(|e| format!("could not relocate the file to read it: {e}"))?;
+    move_path(
+        &mut tunnel,
+        &mut engine.afc,
+        &container_path,
+        &staging,
+        logger,
+    )
+    .await
+    .map_err(|e| format!("could not move the container into Media to read it: {e}"))?;
 
     let read = async {
         let mut fd = engine
             .afc
-            .open(&staging, AfcFopenMode::RdOnly)
+            .open(&inside, AfcFopenMode::RdOnly)
             .await
             .map_err(|e| format!("{e:?}"))?;
         let r = stream_afc_to_local(&mut fd, &dest_local_path).await;
@@ -1819,7 +1937,6 @@ async fn fs_read_async(
     .await;
 
     if let Err(e) = read {
-        // Try to put the file back before reporting the read failure.
         let _ = restore_staged_dir(&mut tunnel, &mut engine.afc, &staging, &dst_back, logger).await;
         return Err(format!("read failed: {e}"));
     }
@@ -1828,8 +1945,8 @@ async fn fs_read_async(
         .await
         .map_err(|e| {
             format!(
-                "The file was read but could not be put back: {e}\n\
-                 It is safe at /var/mobile/Media/{staging} — use Recovery to move it back."
+                "The file was read but the container could not be put back: {e}\n\
+                 Everything is safe at /var/mobile/Media/{staging} — use Recovery to restore it."
             )
         })?;
     Ok(())
@@ -1933,105 +2050,41 @@ async fn fs_write_async(
         return Ok(());
     }
 
-    let token = exploit::random_hex(8);
-    let pickup = format!("readipa-pickup-{token}");
-    let backup = format!("readipa-backup-{token}");
-    let abs = engine.abs_path(&container_path, &rel_path);
-    let dst_back = engine.path(&rel_path);
-
-    // 1. Stream the new content into Media.
-    {
-        let mut fd = engine
-            .afc
-            .open(&pickup, AfcFopenMode::WrOnly)
-            .await
-            .map_err(|e| format!("{e:?}"))?;
-        let r = stream_local_to_afc(&src_local_path, &mut fd).await;
-        let _ = fd.close().await;
-        if let Err(e) = r {
-            let _ = remove_one(&mut engine.afc, &pickup).await;
-            return Err(format!("could not stage the new file: {e}"));
-        }
-    }
-
-    // 2. Move any existing target aside so nothing is destroyed.
-    //    `moved_aside` means we have the previous contents in Media and must
-    //    either delete them (regular file) or put them back.
-    let moved_aside = move_path(&mut tunnel, &mut engine.afc, &abs, &backup, logger)
-        .await
-        .is_ok();
-    let mut backup_is_plain_file = false;
-
-    if moved_aside {
-        match engine.afc.get_file_info(&backup).await {
-            Ok(info) => {
-                if info.st_ifmt.contains("DIR") {
-                    // A directory must never be replaced by a file: put it back.
-                    let _ = move_path(
-                        &mut tunnel,
-                        &mut engine.afc,
-                        &format!("{MEDIA_ROOT}{backup}"),
-                        &dst_back,
-                        logger,
-                    )
-                    .await;
-                    let _ = remove_one(&mut engine.afc, &pickup).await;
-                    return Err(
-                        "A folder already exists at that name; refusing to replace it".into(),
-                    );
-                }
-                backup_is_plain_file = true;
-            }
-            // Could not inspect it — keep it in Media rather than risk deleting
-            // a directory tree.
-            Err(_) => backup_is_plain_file = false,
-        }
-    }
-
-    // 3. Move the staged file into the container.
-    let moved = move_path(
+    // Stage the container once, then write the file straight into it with AFC.
+    let dst_back = engine.path("");
+    let container = container_path.clone();
+    let local_src = src_local_path.clone();
+    let rel = rel_path.clone();
+    let afc_ref = &mut engine.afc;
+    with_container_staged(
         &mut tunnel,
-        &mut engine.afc,
-        &format!("{MEDIA_ROOT}{pickup}"),
+        afc_ref,
+        &container,
         &dst_back,
         logger,
-    )
-    .await;
-
-    match moved {
-        Ok(()) => {
-            // Only discard the previous contents when we know they are a plain
-            // file. Anything else stays in Media and shows up under Recovery.
-            if backup_is_plain_file {
-                let _ = remove_one(&mut engine.afc, &backup).await;
-            }
-            Ok(())
-        }
-        Err(e) => {
-            // Restore the original so the container is left as we found it.
-            let restore = if moved_aside {
-                match move_path(
-                    &mut tunnel,
-                    &mut engine.afc,
-                    &format!("{MEDIA_ROOT}{backup}"),
-                    &dst_back,
-                    logger,
-                )
-                .await
-                {
-                    Ok(()) => "the previous file was restored".to_string(),
-                    Err(re) => format!(
-                        "the previous file is safe at /var/mobile/Media/{backup} but could not be \
-                         restored automatically ({re}); original path: {abs}"
-                    ),
+        move |afc, staging| {
+            let target = format!("{}/{}", staging.trim_end_matches('/'), rel);
+            let local = local_src.clone();
+            async move {
+                if let Some(parent) = target.rsplit_once('/') {
+                    let _ = afc.mk_dir(parent.0).await;
                 }
-            } else {
-                "no previous file existed".to_string()
-            };
-            let _ = remove_one(&mut engine.afc, &pickup).await;
-            Err(format!("write failed: {e} — {restore}"))
-        }
-    }
+                if let Ok(info) = afc.get_file_info(&target).await {
+                    if info.st_ifmt.contains("DIR") {
+                        return Err("A folder already exists at that name".into());
+                    }
+                }
+                let mut fd = afc
+                    .open(&target, AfcFopenMode::WrOnly)
+                    .await
+                    .map_err(|e| format!("{e:?}"))?;
+                let r = stream_local_to_afc(&local, &mut fd).await;
+                let _ = fd.close().await;
+                r.map(|_| ())
+            }
+        },
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -2115,34 +2168,22 @@ async fn fs_mkdir_async(
         return Ok(());
     }
 
-    let token = exploit::random_hex(8);
-    let staging_parent = format!("readipa-mkdir-{token}");
-    let leaf = rel_path.rsplit('/').next().unwrap_or(&rel_path).to_string();
-    let staging = format!("{staging_parent}/{leaf}");
-
-    engine
-        .afc
-        .mk_dir(&staging_parent)
-        .await
-        .map_err(|e| format!("{e:?}"))?;
-    engine
-        .afc
-        .mk_dir(&staging)
-        .await
-        .map_err(|e| format!("{e:?}"))?;
-
-    let dst = engine.path(&rel_path);
-    let result = move_path(
+    let dst_back = engine.path("");
+    let container = container_path.clone();
+    let rel = rel_path.clone();
+    let afc_ref = &mut engine.afc;
+    with_container_staged(
         &mut tunnel,
-        &mut engine.afc,
-        &format!("{MEDIA_ROOT}{staging}"),
-        &dst,
+        afc_ref,
+        &container,
+        &dst_back,
         logger,
+        move |afc, staging| {
+            let target = format!("{}/{}", staging.trim_end_matches('/'), rel);
+            async move { afc.mk_dir(&target).await.map_err(|e| format!("{e:?}")) }
+        },
     )
-    .await;
-
-    let _ = remove_tree_safe(&mut engine.afc, &staging_parent).await;
-    result.map_err(|e| format!("could not create the folder: {e}"))
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -2222,14 +2263,22 @@ async fn fs_remove_async(
         return remove_tree_safe(&mut engine.afc, &afc_path).await;
     }
 
-    // Move out to a Media dump, then delete it there (symlink-safe).
-    let token = exploit::random_hex(8);
-    let dump = format!("readipa-dump-{token}");
-    let abs = engine.abs_path(&container_path, &rel_path);
-    move_path(&mut tunnel, &mut engine.afc, &abs, &dump, logger)
-        .await
-        .map_err(|e| format!("could not move the item out for deletion: {e}"))?;
-    remove_tree_safe(&mut engine.afc, &dump).await
+    let dst_back = engine.path("");
+    let container = container_path.clone();
+    let rel = rel_path.clone();
+    let afc_ref = &mut engine.afc;
+    with_container_staged(
+        &mut tunnel,
+        afc_ref,
+        &container,
+        &dst_back,
+        logger,
+        move |afc, staging| {
+            let target = format!("{}/{}", staging.trim_end_matches('/'), rel);
+            async move { remove_tree_safe(afc, &target).await }
+        },
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -2327,46 +2376,30 @@ async fn fs_rename_async(
         return Ok(());
     }
 
-    let token = exploit::random_hex(8);
-    let hold = format!("readipa-hold-{token}");
-    let old_abs = engine.abs_path(&container_path, &old_rel);
-    let new_dst = engine.path(&new_rel);
-    let old_dst = engine.path(&old_rel);
-
-    move_path(&mut tunnel, &mut engine.afc, &old_abs, &hold, logger)
-        .await
-        .map_err(|e| format!("could not relocate the item to rename it: {e}"))?;
-
-    let moved = move_path(
+    let dst_back = engine.path("");
+    let container = container_path.clone();
+    let old = old_rel.clone();
+    let newrel = new_rel.clone();
+    let afc_ref = &mut engine.afc;
+    with_container_staged(
         &mut tunnel,
-        &mut engine.afc,
-        &format!("{MEDIA_ROOT}{hold}"),
-        &new_dst,
+        afc_ref,
+        &container,
+        &dst_back,
         logger,
-    )
-    .await;
-
-    match moved {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            // Put it back under its original name.
-            let restored = move_path(
-                &mut tunnel,
-                &mut engine.afc,
-                &format!("{MEDIA_ROOT}{hold}"),
-                &old_dst,
-                logger,
-            )
-            .await;
-            match restored {
-                Ok(()) => Err(format!("rename failed: {e} — the original name was restored")),
-                Err(re) => Err(format!(
-                    "rename failed: {e}; the item is safe at /var/mobile/Media/{hold} but could not \
-                     be restored automatically ({re})"
-                )),
+        move |afc, staging| {
+            let from = format!("{}/{}", staging.trim_end_matches('/'), old);
+            let to = format!("{}/{}", staging.trim_end_matches('/'), newrel);
+            async move {
+                // Never clobber: a shadowed destination would be silent data loss.
+                if afc.get_file_info(&to).await.is_ok() {
+                    return Err("A file or folder with that name already exists".to_string());
+                }
+                afc.rename(&from, &to).await.map_err(|e| format!("{e:?}"))
             }
-        }
-    }
+        },
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -3113,35 +3146,71 @@ async fn diagnose_async(
     }
     report.insert("afcServices".into(), serde_json::Value::Object(services));
 
-    // 5. Optional: try a single tiny relocation to see whether moves work.
+    // 5. Relocation probes — this is what decides whether AirTraffic can give
+    //    us "eyes". A rename needs write permission on the entry's PARENT, so
+    //    the container root (parent = .../Data/Application, confirmed writable)
+    //    should move, while a nested entry (parent = <UUID>) should not.
     if risky_moves_allowed() {
+        let dst_back = engine.path("");
+
+        // 5a. The container root: one move exposes the WHOLE tree to AFC.
         let token = exploit::random_hex(6);
         let staging = format!("readipa-diag-{token}");
-        let meta_abs = format!("{}/{}", container_path.trim_end_matches('/'), metadata);
-        let moved = move_path(&mut tunnel, &mut afc, &meta_abs, &staging, logger).await;
-        match &moved {
+        match move_path(&mut tunnel, &mut afc, &container_path, &staging, logger).await {
             Ok(()) => {
+                let top = afc.list_dir(&staging).await;
+                let mut listing: Vec<String> = Vec::new();
+                if let Ok(names) = &top {
+                    for n in names.iter().take(60) {
+                        if n == "." || n == ".." {
+                            continue;
+                        }
+                        let kind = afc
+                            .get_file_info(&format!("{staging}/{n}"))
+                            .await
+                            .map(|i| i.st_ifmt.clone())
+                            .unwrap_or_else(|_| "?".into());
+                        listing.push(format!("{n} ({kind})"));
+                    }
+                }
                 report.insert(
-                    "relocationProbe".into(),
-                    json!({"ok": true, "note": "moved out and back"}),
+                    "rootMove".into(),
+                    json!({
+                        "ok": true,
+                        "listingWorks": top.is_ok(),
+                        "entries": listing,
+                        "listError": top.err().map(|e| format!("{e:?}")),
+                    }),
                 );
-                let back = move_path(
-                    &mut tunnel,
-                    &mut afc,
-                    &format!("{MEDIA_ROOT}{staging}"),
-                    &bridge,
-                    logger,
-                )
-                .await;
-                if let Err(e) = back {
-                    report.insert(
-                        "relocationRestore".into(),
-                        json!({"ok": false, "error": e, "keptAt": format!("{MEDIA_ROOT}{staging}")}),
-                    );
+                match restore_staged_dir(&mut tunnel, &mut afc, &staging, &dst_back, logger).await {
+                    Ok(()) => {
+                        report.insert("rootMoveRestored".into(), json!(true));
+                    }
+                    Err(e) => {
+                        report.insert(
+                            "rootMoveRestored".into(),
+                            json!({"ok": false, "error": e, "keptAt": format!("{MEDIA_ROOT}{staging}")}),
+                        );
+                    }
                 }
             }
             Err(e) => {
-                report.insert("relocationProbe".into(), json!({"ok": false, "error": e}));
+                report.insert("rootMove".into(), json!({"ok": false, "error": e}));
+            }
+        }
+
+        // 5b. A nested entry, for contrast: its parent is the container itself.
+        let token2 = exploit::random_hex(6);
+        let staging2 = format!("readipa-diag-{token2}");
+        let meta_abs = format!("{}/{}", container_path.trim_end_matches('/'), metadata);
+        match move_path(&mut tunnel, &mut afc, &meta_abs, &staging2, logger).await {
+            Ok(()) => {
+                report.insert("nestedMove".into(), json!({"ok": true}));
+                let _ =
+                    restore_staged_dir(&mut tunnel, &mut afc, &staging2, &dst_back, logger).await;
+            }
+            Err(e) => {
+                report.insert("nestedMove".into(), json!({"ok": false, "error": e}));
             }
         }
     }

@@ -351,22 +351,35 @@ async fn export_async(
             );
         }
         mode = "move";
+        // Move the container ROOT: its parent is writable, a nested folder's
+        // is not — and one move exposes the entire tree.
         let token = exploit::random_hex(8);
-        let staging = format!("readipa-export-{token}");
-        let abs = engine.abs_path(&container_path, &rel_path);
-        let dst_back = engine.path(&rel_path);
+        let staging = format!("readipa-mount-{token}");
+        let dst_back = engine.path("");
 
-        fsengine::move_path(&mut tunnel, &mut engine.afc, &abs, &staging, logger)
-            .await
-            .map_err(|e| format!("could not relocate the folder for export: {e}"))?;
+        fsengine::move_path(
+            &mut tunnel,
+            &mut engine.afc,
+            &container_path,
+            &staging,
+            logger,
+        )
+        .await
+        .map_err(|e| format!("could not move the container into Media for export: {e}"))?;
+
+        let root = if rel_path.is_empty() {
+            staging.clone()
+        } else {
+            format!("{}/{}", staging.trim_end_matches('/'), rel_path)
+        };
 
         if want.is_empty() {
-            archive_tree(&mut engine.afc, &staging, &prefix, &mut exporter, logger).await;
+            archive_tree(&mut engine.afc, &root, &prefix, &mut exporter, logger).await;
             subtree_report.push(json!({"path": ".", "ok": true, "note": "whole container"}));
         } else {
             for sub in &want {
                 let before = exporter.files;
-                let probe = format!("{staging}/{sub}");
+                let probe = format!("{}/{}", root.trim_end_matches('/'), sub);
                 if engine.afc.get_file_info(&probe).await.is_err() {
                     subtree_report.push(json!({"path": sub, "ok": false, "error": "not present"}));
                     continue;

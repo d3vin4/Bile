@@ -41,14 +41,12 @@ struct AppsView: View {
                     emptyState
                 } else if mode == 0 {
                     appList
-                } else if mode == 1 {
-                    groupList
                 } else {
-                    jitList
+                    groupList
                 }
             }
             .searchable(text: $search, prompt: mode == 0 ? lang("search.apps") : lang("search.groups"))
-            .navigationTitle(mode == 0 ? lang("apps") : (mode == 1 ? lang("app.groups") : "JIT"))
+            .navigationTitle(mode == 0 ? lang("apps") : lang("app.groups"))
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { state.loadCatalog() } label: {
@@ -88,49 +86,6 @@ struct AppsView: View {
         }
         .listStyle(.plain)
         .refreshable { state.loadCatalog() }
-    }
-
-    // MARK: - JIT
-
-    private var jitList: some View {
-        List {
-            Section {
-                ForEach(state.jitCapableApps) { app in
-                    HStack(spacing: 10) {
-                        AppIconView(bundleId: app.bundleId, name: app.name, size: 40)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(app.name).lineLimit(1)
-                            Text(app.bundleId)
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        if state.jitDone.contains(app.bundleId) {
-                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
-                        } else if state.jitBusy == app.bundleId {
-                            ProgressView()
-                        } else {
-                            Button("Enable") { state.enableJIT(app) }
-                                .readipaGlassButton()
-                        }
-                    }
-                }
-            } footer: {
-                Text("JIT can only be enabled for sideloaded apps that carry the get-task-allow "
-                     + "entitlement — the same rule every on-device debugger follows. The app is "
-                     + "relaunched suspended, the debugger attaches, then detaches so it keeps "
-                     + "running with JIT. Nothing is installed or modified.")
-                    .font(.caption2)
-            }
-            if state.jitCapableApps.isEmpty {
-                Text(state.hasPairingFile ? "No sideloaded (get-task-allow) app found — load the catalog first."
-                                          : "Pair the device first.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .listStyle(.insetGrouped)
     }
 
     // MARK: - App Groups
@@ -305,26 +260,6 @@ struct AppDetailView: View {
                     HStack { Text(lang("version")); Spacer(); Text(app.version).foregroundStyle(.secondary) }
                 }
                 HStack { Text(lang("type")); Spacer(); Text(app.type).foregroundStyle(.secondary) }
-            }
-
-            Section {
-                Button {
-                    state.backupAppData(app)
-                } label: {
-                    if state.backupBusy == app.bundleId {
-                        HStack(spacing: 8) { ProgressView(); Text("Backing up…") }
-                    } else {
-                        Label("Download all data (backup)", systemImage: "arrow.down.circle")
-                    }
-                }
-                .disabled(state.backupBusy != nil)
-                Text("Uses the device's own backup service to stream this app's data to Readipa, "
-                     + "then zips it for Save to Files. It is the only route that works for apps "
-                     + "where iOS blocks direct access — and it never changes anything on the device.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Text("Export")
             }
 
             Section(lang("data.container")) {

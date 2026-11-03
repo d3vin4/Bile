@@ -9,7 +9,6 @@
 
 use std::ffi::{c_char, c_void};
 
-pub mod backup;
 pub mod containers;
 pub mod exploit;
 pub mod export;
@@ -17,7 +16,6 @@ pub mod ffi_util;
 pub mod fsengine;
 pub mod grappa;
 pub mod icons;
-pub mod jit;
 pub mod logging;
 pub mod pairing;
 
@@ -306,83 +304,6 @@ pub unsafe extern "C" fn al_fs_remove(
         Err(e) => {
             if !out_error.is_null() {
                 *out_error = ffi_util::cstr(format!("Rust panic in al_fs_remove: {e:?}"));
-            }
-            1
-        }
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn al_zip_local_dir(
-    source_dir: *const c_char,
-    dest_zip_path: *const c_char,
-    out_error: *mut *mut c_char,
-) -> i32 {
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        export::zip_local_dir(source_dir, dest_zip_path, out_error)
-    }));
-    match res {
-        Ok(rc) => rc,
-        Err(e) => {
-            if !out_error.is_null() {
-                *out_error = ffi_util::cstr(format!("Rust panic in al_zip_local_dir: {e:?}"));
-            }
-            1
-        }
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn al_backup_app(
-    pairing_path: *const c_char,
-    bundle_id: *const c_char,
-    dest_dir: *const c_char,
-    timeout_secs: u32,
-    log_cb: exploit::ALLogCallback,
-    ctx: *mut c_void,
-    out_json: *mut *mut c_char,
-    out_error: *mut *mut c_char,
-) -> i32 {
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        backup::backup_app(
-            pairing_path,
-            bundle_id,
-            dest_dir,
-            timeout_secs,
-            log_cb,
-            ctx,
-            out_json,
-            out_error,
-        )
-    }));
-    match res {
-        Ok(rc) => rc,
-        Err(e) => {
-            if !out_error.is_null() {
-                *out_error = ffi_util::cstr(format!("Rust panic in al_backup_app: {e:?}"));
-            }
-            1
-        }
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn al_jit_enable(
-    pairing_path: *const c_char,
-    bundle_id: *const c_char,
-    log_cb: exploit::ALLogCallback,
-    ctx: *mut c_void,
-    out_json: *mut *mut c_char,
-    out_error: *mut *mut c_char,
-) -> i32 {
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        jit::jit_enable(pairing_path, bundle_id, log_cb, ctx, out_json, out_error)
-    }));
-    match res {
-        Ok(rc) => rc,
-        Err(e) => {
-            if !out_error.is_null() {
-                *out_error = ffi_util::cstr(format!("Rust panic in al_jit_enable: {e:?}"));
             }
             1
         }
