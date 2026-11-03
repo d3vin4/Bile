@@ -3151,7 +3151,7 @@ async fn diagnose_async(
     //    the container root (parent = .../Data/Application, confirmed writable)
     //    should move, while a nested entry (parent = <UUID>) should not.
     if risky_moves_allowed() {
-        let dst_back = engine.path("");
+        let dst_back = bridge.clone();
 
         // 5a. The container root: one move exposes the WHOLE tree to AFC.
         let token = exploit::random_hex(6);
