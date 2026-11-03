@@ -13,6 +13,7 @@ pub mod containers;
 pub mod exploit;
 pub mod export;
 pub mod ffi_util;
+pub mod file_service;
 pub mod fsengine;
 pub mod grappa;
 pub mod icons;
@@ -304,6 +305,40 @@ pub unsafe extern "C" fn al_fs_remove(
         Err(e) => {
             if !out_error.is_null() {
                 *out_error = ffi_util::cstr(format!("Rust panic in al_fs_remove: {e:?}"));
+            }
+            1
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn al_file_service_list(
+    pairing_path: *const c_char,
+    scope: *const c_char,
+    identifier: *const c_char,
+    directory: *const c_char,
+    log_cb: exploit::ALLogCallback,
+    ctx: *mut c_void,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        file_service::list_directory(
+            pairing_path,
+            scope,
+            identifier,
+            directory,
+            log_cb,
+            ctx,
+            out_json,
+            out_error,
+        )
+    }));
+    match res {
+        Ok(rc) => rc,
+        Err(e) => {
+            if !out_error.is_null() {
+                *out_error = ffi_util::cstr(format!("Rust panic in al_file_service_list: {e:?}"));
             }
             1
         }

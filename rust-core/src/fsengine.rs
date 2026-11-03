@@ -31,6 +31,7 @@ use serde_json::json;
 
 use crate::exploit::{self, AppDeviceTunnel, Logger};
 use crate::ffi_util::{cstr, opt_str};
+use crate::file_service;
 
 const DATA_ROOT: &str = "/var/mobile/Containers/Data/Application";
 const GROUP_ROOT: &str = "/var/mobile/Containers/Shared/AppGroup";
@@ -141,6 +142,15 @@ pub(crate) fn human_bytes(bytes: u64) -> String {
         format!("{bytes} B")
     } else {
         format!("{value:.1} {}", units[index])
+    }
+}
+
+/// FileService scope name for a container root.
+pub(crate) fn fs_scope(container_path: &str) -> &'static str {
+    if container_path.contains("/Shared/AppGroup") {
+        "appGroup"
+    } else {
+        "application"
     }
 }
 
@@ -1506,6 +1516,39 @@ async fn fs_list_async(
     bridge: String,
     logger: &Logger,
 ) -> Result<String, String> {
+    // CoreDevice FileService first: it needs no bridge symlink and never touches
+    // the container. When the service is absent (older iOS / Developer Mode off)
+    // this fails fast and the AirLift bridge path below runs as usual.
+    if !bundle_id.is_empty() {
+        if let Ok(pairing_bytes) = read_pairing(&pairing_path) {
+            if let Ok(mut fs_tunnel) = exploit::connect_tunnel(&pairing_bytes, logger).await {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(25),
+                    file_service::list_entries(
+                        &mut fs_tunnel,
+                        fs_scope(&container_path),
+                        &bundle_id,
+                        &rel_path,
+                        logger,
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(listed)) => {
+                        return Ok(serde_json::to_string_pretty(&json!({
+                            "entries": listed,
+                            "bridge": bridge,
+                            "via": "fileservice",
+                        }))
+                        .map_err(|e| e.to_string())?);
+                    }
+                    Ok(Err(e)) => logger.log(format!("file_service listing unavailable: {e}")),
+                    Err(_) => logger.log("file_service listing timed out".to_string()),
+                }
+            }
+        }
+    }
+
     let (mut tunnel, mut engine) =
         open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
 
@@ -1777,6 +1820,43 @@ async fn fs_stat_async(
     bridge: String,
     logger: &Logger,
 ) -> Result<String, String> {
+    if !bundle_id.is_empty() {
+        if let Ok(pairing_bytes) = read_pairing(&pairing_path) {
+            if let Ok(mut fs_tunnel) = exploit::connect_tunnel(&pairing_bytes, logger).await {
+                let name = rel_path
+                    .rsplit('/')
+                    .next()
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(&rel_path)
+                    .to_string();
+                let name = if name.is_empty() {
+                    container_path.clone()
+                } else {
+                    name
+                };
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    file_service::stat_entry(
+                        &mut fs_tunnel,
+                        fs_scope(&container_path),
+                        &bundle_id,
+                        &rel_path,
+                        &name,
+                        logger,
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(entry)) => {
+                        return serde_json::to_string_pretty(&entry).map_err(|e| e.to_string());
+                    }
+                    Ok(Err(e)) => logger.log(format!("file_service stat unavailable: {e}")),
+                    Err(_) => logger.log("file_service stat timed out".to_string()),
+                }
+            }
+        }
+    }
+
     let (_tunnel, mut engine) =
         open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
     let afc_path = engine.path(&rel_path);
@@ -1873,12 +1953,42 @@ async fn fs_read_async(
     dest_local_path: String,
     logger: &Logger,
 ) -> Result<(), String> {
-    let (mut tunnel, mut engine) =
-        open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
-
     if let Some(parent) = std::path::Path::new(&dest_local_path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+
+    // CoreDevice FileService first — no bridge, no relocation.
+    if !bundle_id.is_empty() {
+        if let Ok(pairing_bytes) = read_pairing(&pairing_path) {
+            if let Ok(mut fs_tunnel) = exploit::connect_tunnel(&pairing_bytes, logger).await {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(180),
+                    file_service::read_to_local(
+                        &mut fs_tunnel,
+                        fs_scope(&container_path),
+                        &bundle_id,
+                        &rel_path,
+                        &dest_local_path,
+                        logger,
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(bytes)) => {
+                        logger.log(format!(
+                            "file_service: read '{rel_path}' ({bytes} bytes) without relocating it"
+                        ));
+                        return Ok(());
+                    }
+                    Ok(Err(e)) => logger.log(format!("file_service read unavailable: {e}")),
+                    Err(_) => logger.log("file_service read timed out".to_string()),
+                }
+            }
+        }
+    }
+
+    let (mut tunnel, mut engine) =
+        open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
 
     // Always try the direct read first: if AFC serves the file through the
     // bridge, nothing in the container is touched at all.
@@ -2054,6 +2164,36 @@ async fn fs_write_async(
     src_local_path: String,
     logger: &Logger,
 ) -> Result<(), String> {
+    // CoreDevice FileService first: no bridge, no relocation.
+    if !bundle_id.is_empty() {
+        if let Ok(pairing_bytes) = read_pairing(&pairing_path) {
+            if let Ok(mut fs_tunnel) = exploit::connect_tunnel(&pairing_bytes, logger).await {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(300),
+                    file_service::write_from_local(
+                        &mut fs_tunnel,
+                        fs_scope(&container_path),
+                        &bundle_id,
+                        &rel_path,
+                        &src_local_path,
+                        logger,
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(bytes)) => {
+                        logger.log(format!(
+                            "file_service: wrote '{rel_path}' ({bytes} bytes) without relocating the container"
+                        ));
+                        return Ok(());
+                    }
+                    Ok(Err(e)) => logger.log(format!("file_service write unavailable: {e}")),
+                    Err(_) => logger.log("file_service write timed out".to_string()),
+                }
+            }
+        }
+    }
+
     let (mut tunnel, mut engine) =
         open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
 
@@ -2169,6 +2309,32 @@ async fn fs_mkdir_async(
     bridge: String,
     logger: &Logger,
 ) -> Result<(), String> {
+    if !bundle_id.is_empty() {
+        if let Ok(pairing_bytes) = read_pairing(&pairing_path) {
+            if let Ok(mut fs_tunnel) = exploit::connect_tunnel(&pairing_bytes, logger).await {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(60),
+                    file_service::mkdir(
+                        &mut fs_tunnel,
+                        fs_scope(&container_path),
+                        &bundle_id,
+                        &rel_path,
+                        logger,
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {
+                        logger.log(format!("file_service: created folder '{rel_path}'"));
+                        return Ok(());
+                    }
+                    Ok(Err(e)) => logger.log(format!("file_service mkdir unavailable: {e}")),
+                    Err(_) => logger.log("file_service mkdir timed out".to_string()),
+                }
+            }
+        }
+    }
+
     let (mut tunnel, mut engine) =
         open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
 
@@ -2263,6 +2429,34 @@ async fn fs_remove_async(
     bridge: String,
     logger: &Logger,
 ) -> Result<(), String> {
+    if !bundle_id.is_empty() {
+        if let Ok(pairing_bytes) = read_pairing(&pairing_path) {
+            if let Ok(mut fs_tunnel) = exploit::connect_tunnel(&pairing_bytes, logger).await {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(300),
+                    file_service::remove_tree(
+                        &mut fs_tunnel,
+                        fs_scope(&container_path),
+                        &bundle_id,
+                        &rel_path,
+                        logger,
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {
+                        logger.log(format!(
+                            "file_service: removed '{rel_path}' (symlinks untouched)"
+                        ));
+                        return Ok(());
+                    }
+                    Ok(Err(e)) => logger.log(format!("file_service remove unavailable: {e}")),
+                    Err(_) => logger.log("file_service remove timed out".to_string()),
+                }
+            }
+        }
+    }
+
     let (mut tunnel, mut engine) =
         open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
 
@@ -2358,6 +2552,33 @@ async fn fs_rename_async(
     bridge: String,
     logger: &Logger,
 ) -> Result<(), String> {
+    if !bundle_id.is_empty() {
+        if let Ok(pairing_bytes) = read_pairing(&pairing_path) {
+            if let Ok(mut fs_tunnel) = exploit::connect_tunnel(&pairing_bytes, logger).await {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(120),
+                    file_service::rename(
+                        &mut fs_tunnel,
+                        fs_scope(&container_path),
+                        &bundle_id,
+                        &old_rel,
+                        &new_rel,
+                        logger,
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {
+                        logger.log(format!("file_service: renamed '{old_rel}' to '{new_rel}'"));
+                        return Ok(());
+                    }
+                    Ok(Err(e)) => logger.log(format!("file_service rename unavailable: {e}")),
+                    Err(_) => logger.log("file_service rename timed out".to_string()),
+                }
+            }
+        }
+    }
+
     let (mut tunnel, mut engine) =
         open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
 
@@ -3012,6 +3233,26 @@ async fn probe_access_async(
         }
     } else {
         evidence.push("house_arrest: no bundle id for this container".into());
+    }
+
+    // 1a. Core Device FileService (iOS 26+): the sanctioned container browser.
+    let fs_scope = if container_path.contains("/Shared/AppGroup") {
+        "appGroup"
+    } else {
+        "application"
+    };
+    let fs_probe = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        crate::file_service::probe_service(&mut tunnel, fs_scope, &bundle_id, logger),
+    )
+    .await;
+    match fs_probe {
+        Ok(Ok(msg)) => {
+            evidence.push(msg);
+            return Ok(verdict("fileservice", &evidence));
+        }
+        Ok(Err(e)) => evidence.push(format!("fileservice: {e}")),
+        Err(_) => evidence.push("fileservice: no answer within 20 s".into()),
     }
 
     // 1b. iOS 27's second-generation house-arrest service (the one 3105 uses).

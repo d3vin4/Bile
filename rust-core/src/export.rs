@@ -19,6 +19,7 @@ use serde_json::json;
 
 use crate::exploit::{self, AppDeviceTunnel, Logger};
 use crate::ffi_util::{cstr, opt_str};
+use crate::file_service;
 use crate::fsengine;
 
 const CHUNK: usize = 256 * 1024;
@@ -191,6 +192,127 @@ pub(crate) async fn archive_tree(
     }
 }
 
+/// Walk a container through the CoreDevice FileService and add everything to
+/// the archive. Symlinks are recorded, never followed.
+async fn archive_fs_tree(
+    session: &mut file_service::Session,
+    root_fs: &str,
+    prefix: &str,
+    exporter: &mut Exporter,
+    logger: &Logger,
+) {
+    let mut stack: Vec<(String, String, usize)> = vec![(
+        root_fs.trim_end_matches('/').to_string(),
+        prefix.trim_end_matches('/').to_string(),
+        0usize,
+    )];
+
+    while let Some((dir, zip_dir, depth)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            exporter
+                .failures
+                .push(format!("{zip_dir}: depth limit reached"));
+            continue;
+        }
+        let names = match session.list(&dir).await {
+            Ok(n) => n,
+            Err(e) => {
+                exporter
+                    .failures
+                    .push(format!("{zip_dir}: list failed {e}"));
+                continue;
+            }
+        };
+        for name in names {
+            if name == "." || name == ".." {
+                continue;
+            }
+            if exporter.files + exporter.links + exporter.dirs >= MAX_ENTRIES {
+                exporter.failures.push("entry limit reached".to_string());
+                return;
+            }
+            let child_fs = if dir.trim_matches('/').is_empty() {
+                name.clone()
+            } else {
+                format!("{}/{}", dir.trim_end_matches('/'), name)
+            };
+            let child_zip = if zip_dir.is_empty() {
+                name.clone()
+            } else {
+                format!("{zip_dir}/{name}")
+            };
+            let attrs = match session.attributes(&child_fs).await {
+                Ok(a) => a,
+                Err(e) => {
+                    exporter.failures.push(format!("{child_zip}: {e}"));
+                    continue;
+                }
+            };
+            if attrs.is_link {
+                // Record the target; never follow it.
+                let target = session
+                    .read_symbolic_link(&child_fs)
+                    .await
+                    .unwrap_or_default();
+                let note = format!("symbolic link -> {target}\n");
+                if exporter
+                    .add_bytes(&format!("{child_zip}.symlink.txt"), note.as_bytes())
+                    .is_err()
+                {
+                    exporter
+                        .failures
+                        .push(format!("{child_zip}: could not record link"));
+                }
+                exporter.links += 1;
+                continue;
+            }
+            if attrs.is_dir {
+                if exporter.add_dir(&child_zip).is_err() {
+                    exporter
+                        .failures
+                        .push(format!("{child_zip}: could not add directory"));
+                }
+                exporter.dirs += 1;
+                stack.push((child_fs, child_zip, depth + 1));
+                continue;
+            }
+            match copy_fs_file(session, &child_fs, &child_zip, exporter).await {
+                Ok(n) => {
+                    exporter.files += 1;
+                    exporter.bytes += n;
+                    logger.log(format!("export: {child_zip} ({n} bytes)"));
+                }
+                Err(e) => exporter.failures.push(format!("{child_zip}: {e}")),
+            }
+        }
+    }
+}
+
+async fn copy_fs_file(
+    session: &mut file_service::Session,
+    fs_path: &str,
+    zip_name: &str,
+    exporter: &mut Exporter,
+) -> Result<u64, String> {
+    let fd = session.open_file(fs_path, 0, 0o644).await?;
+    let result = async {
+        exporter.start_file(zip_name)?;
+        let mut offset = 0u64;
+        loop {
+            let chunk = session.read_chunk(fd, offset, CHUNK).await?;
+            if chunk.is_empty() {
+                break;
+            }
+            exporter.write(&chunk)?;
+            offset += chunk.len() as u64;
+        }
+        Ok(offset)
+    }
+    .await;
+    let _ = session.close_file(fd).await;
+    result
+}
+
 // ---------------------------------------------------------------------------
 // FFI
 // ---------------------------------------------------------------------------
@@ -293,12 +415,6 @@ async fn export_async(
     let mut exporter = Exporter::new(file);
 
     let prefix = root_name.trim().trim_matches('/').to_string();
-    let (mut tunnel, mut engine) =
-        fsengine::open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
-
-    let mut mode = "direct";
-    let mut relocate: Option<(String, String)> = None;
-
     // Which parts of the container to export. Empty = everything.
     let want: Vec<String> = subtrees
         .split(',')
@@ -306,6 +422,122 @@ async fn export_async(
         .filter(|s| !s.is_empty())
         .collect();
     let mut subtree_report: Vec<serde_json::Value> = Vec::new();
+
+    // CoreDevice FileService: export without a bridge and without moving
+    // anything inside the container.
+    if !bundle_id.is_empty() {
+        let scope = fsengine::fs_scope(&container_path);
+        let mut fs_session = None;
+        if let Ok(pairing_bytes) = fsengine::read_pairing(&pairing_path) {
+            if let Ok(mut fs_tunnel) = exploit::connect_tunnel(&pairing_bytes, logger).await {
+                match file_service::Domain::from_name(scope) {
+                    Ok(domain) => {
+                        match file_service::Session::open(
+                            &mut fs_tunnel,
+                            domain,
+                            &bundle_id,
+                            logger,
+                        )
+                        .await
+                        {
+                            Ok(session) => fs_session = Some(session),
+                            Err(e) => logger.log(format!("file_service export unavailable: {e}")),
+                        }
+                    }
+                    Err(e) => logger.log(format!("file_service export unavailable: {e}")),
+                }
+            }
+        }
+        if let Some(mut session) = fs_session {
+            if let Err(e) = session.list(&rel_path).await {
+                logger.log(format!("file_service export unavailable: {e}"));
+            } else {
+                if want.is_empty() {
+                    archive_fs_tree(&mut session, &rel_path, &prefix, &mut exporter, logger).await;
+                    subtree_report
+                        .push(json!({"path": ".", "ok": true, "note": "whole container"}));
+                } else {
+                    for sub in &want {
+                        if !fsengine::safe_rel(sub) {
+                            subtree_report
+                                .push(json!({"path": sub, "ok": false, "error": "unsafe path"}));
+                            continue;
+                        }
+                        let before = exporter.files;
+                        let fs_path = format!(
+                            "{}{}{}",
+                            rel_path,
+                            if rel_path.is_empty() { "" } else { "/" },
+                            sub
+                        );
+                        match session.attributes(&fs_path).await {
+                            Ok(_) => {}
+                            Err(_) => {
+                                subtree_report.push(
+                                    json!({"path": sub, "ok": false, "error": "not present"}),
+                                );
+                                continue;
+                            }
+                        }
+                        let zip_prefix = if prefix.is_empty() {
+                            sub.clone()
+                        } else {
+                            format!("{prefix}/{sub}")
+                        };
+                        archive_fs_tree(&mut session, &fs_path, &zip_prefix, &mut exporter, logger)
+                            .await;
+                        subtree_report.push(json!({
+                            "path": sub,
+                            "ok": true,
+                            "files": exporter.files - before,
+                        }));
+                    }
+                }
+
+                let manifest = json!({
+                    "app": root_name,
+                    "bundleId": bundle_id,
+                    "container": container_path,
+                    "path": rel_path,
+                    "mode": "fileservice",
+                    "files": exporter.files,
+                    "directories": exporter.dirs,
+                    "symlinks": exporter.links,
+                    "bytes": exporter.bytes,
+                    "failures": exporter.failures,
+                    "subtrees": subtree_report,
+                    "generator": "Readipa",
+                });
+                let manifest_bytes =
+                    serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
+                let _ = exporter.add_bytes("_readipa_export.json", &manifest_bytes);
+
+                let files = exporter.files;
+                let bytes = exporter.bytes;
+                let dirs = exporter.dirs;
+                let links = exporter.links;
+                let failures = exporter.failures.clone();
+                exporter.finish()?;
+                return Ok(serde_json::to_string_pretty(&json!({
+                    "zip": dest_zip_path,
+                    "files": files,
+                    "directories": dirs,
+                    "symlinks": links,
+                    "bytes": bytes,
+                    "mode": "fileservice",
+                    "failures": failures,
+                    "subtrees": subtree_report,
+                }))
+                .map_err(|e| e.to_string())?);
+            }
+        }
+    }
+
+    let (mut tunnel, mut engine) =
+        fsengine::open_engine(&pairing_path, &bundle_id, &container_path, &bridge, logger).await?;
+
+    let mut mode = "direct";
+    let mut relocate: Option<(String, String)> = None;
 
     if engine.direct_read {
         let root_afc = engine.path(&rel_path);

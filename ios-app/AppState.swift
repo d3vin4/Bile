@@ -198,7 +198,17 @@ final class AppState: ObservableObject {
                     self.probeAccess()
                 }
             } catch {
-                await MainActor.run { self.filesError = error.localizedDescription }
+                // The AirLift bridge is only needed by the AFC path. The CoreDevice
+                // FileService (and HouseArrest) work without it — keep going so the
+                // browser can still open the container.
+                await MainActor.run {
+                    self.bridge = ""
+                    self.bridgeMode = "none"
+                    self.bridgeRequiresRiskyMoves = false
+                    self.filesError = nil
+                    self.loadFiles()
+                    self.probeAccess()
+                }
             }
         }
     }

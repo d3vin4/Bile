@@ -199,7 +199,9 @@ struct GroupRow: View {
                 Button {
                     state.openContainer(
                         path: group.path,
-                        bundleId: group.owners.first ?? "",
+                        // For app groups the FileService identifier is the group id
+                        // itself (not the owning app's bundle id).
+                        bundleId: group.id,
                         name: shortGroupName
                     )
                 } label: {
@@ -282,7 +284,7 @@ struct AppDetailView: View {
                 Section(lang("app.groups")) {
                     ForEach(app.groupContainers.sorted(by: { $0.key < $1.key }), id: \.key) { key, path in
                         Button {
-                            state.openContainer(path: path, bundleId: app.bundleId, name: key)
+                            state.openContainer(path: path, bundleId: key, name: key)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(key).font(.caption.bold()).lineLimit(1)

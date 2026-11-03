@@ -168,6 +168,16 @@ void al_clear_target_hosts(void);
 // Container catalog & file system (Application Containers + App Groups)
 // ---------------------------------------------------------------------------
 
+// List a container through the Core Device FileService (iOS 26+).
+int32_t al_file_service_list(const char *pairing_path,
+                             const char *scope,
+                             const char *identifier,
+                             const char *directory,
+                             ALLogCallback log_cb,
+                             void *ctx,
+                             char **out_json,
+                             char **out_error);
+
 // Work out what iOS allows for this container (HouseArrest / bridge / write
 // probe). Returns a short JSON verdict; used to explain dead ends up-front.
 int32_t al_probe_access(const char *pairing_path,

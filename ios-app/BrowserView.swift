@@ -99,9 +99,16 @@ struct BrowserView: View {
         if state.containerAccess == "none" {
             banner(
                 "iOS refuses access to this container. Only apps that are sideloaded "
-                + "(get-task-allow) or that enable file sharing can be opened — this is a limit of "
-                + "the operating system, not of Readipa. See the Logs tab for the probe result.",
+                + "(get-task-allow) or that enable file sharing can be opened. If Developer Mode is "
+                + "off, turn it on in Settings → Privacy & Security and reconnect — iOS then exposes "
+                + "its FileService. See the Logs tab for the exact probe result.",
                 color: .red
+            )
+        } else if state.containerAccess == "fileservice" {
+            banner(
+                "Browsing through the iOS FileService — nothing inside the container is moved "
+                + "or modified to read it.",
+                color: .green
             )
         } else if state.bridgeRequiresRiskyMoves && !state.allowRiskyMoves {
             banner(
