@@ -79,6 +79,14 @@ impl Session {
             "file_service: connecting to {CTRL_SERVICE} (domain {} id {identifier})…",
             domain as u64
         ));
+        match tunnel.rsd_service_features(CTRL_SERVICE) {
+            Some(features) => logger.log(format!(
+                "file_service: device advertises {} feature(s): {}",
+                features.len(),
+                features.join(", ")
+            )),
+            None => logger.log("file_service: device advertises no feature list".to_string()),
+        }
         let stream = tunnel.connect_rsd_service_raw(CTRL_SERVICE, logger).await?;
         let mut client = RemoteXpcClient::new(stream)
             .await
@@ -310,6 +318,10 @@ impl Session {
     }
 
     async fn rename(&mut self, old_path: &str, new_path: &str) -> Result<(), String> {
+        // rename(2) silently replaces an existing destination; refuse instead.
+        if self.attributes(new_path).await.is_ok() {
+            return Err("A file or folder with that name already exists".into());
+        }
         self.file_operation(
             "Rename",
             Dictionary::from_iter([
