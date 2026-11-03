@@ -122,8 +122,21 @@ final class PairingController: ObservableObject {
         pairingStatus = "Starting local host…"
 
         // Show the Live Activity from the very first moment: the PIN arrives a
-        // few seconds later and is pushed into the same activity.
+        // few seconds later and is pushed into the same activity. The first
+        // update is an *alert*, so the system lights the screen up and shows
+        // the activity as soon as Pairing is tapped.
         startPairingActivity(pin: nil)
+        updatePairingActivity(
+            status: t("Waiting for Settings › Developer Mode…", "Đang chờ vào Cài đặt › Developer Mode…"),
+            alert: AlertConfiguration(
+                title: t("Readipa is pairing", "Readipa đang ghép đôi"),
+                body: t(
+                    "The code to type into Settings appears here.",
+                    "Mã PIN để nhập vào Cài đặt sẽ hiện ở đây."
+                ),
+                sound: .default
+            )
+        )
 
         Task {
             _ = await localNetwork.request()
@@ -131,7 +144,9 @@ final class PairingController: ObservableObject {
 
             keepAlive.startAudio()
             pairingStatus = "Broadcasting… open Settings to pair"
-            updatePairingActivity(status: "Waiting for Settings › Developer Mode…")
+            updatePairingActivity(
+                status: t("Waiting for Settings › Developer Mode…", "Đang chờ vào Cài đặt › Developer Mode…")
+            )
             runHost()
         }
     }
@@ -193,7 +208,6 @@ final class PairingController: ObservableObject {
     }
 
     private func finish(_ outcome: Outcome) {
-        endPairingActivity()
         stopAdvertising()
         // Keep background alive for 5s so iOS doesn't kill the app before user returns from Settings
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
@@ -208,13 +222,16 @@ final class PairingController: ObservableObject {
             let size = (try? FileManager.default.attributesOfItem(atPath: canonical)[.size] as? Int) ?? 0
             if size == 0 {
                 pairingStatus = "Failed: empty pairing file"
+                finishPairingActivity(success: false)
                 resolve(.failure(PairingError.zeroBytes))
             } else {
                 pairingStatus = "Paired: \(name) (\(size)B)"
+                finishPairingActivity(success: true)
                 resolve(.success(canonical))
             }
         case let .failure(message):
             pairingStatus = "Failed: \(message)"
+            finishPairingActivity(success: false)
             resolve(.failure(PairingError.failed(message)))
         }
     }
@@ -239,7 +256,24 @@ final class PairingController: ObservableObject {
     fileprivate func presentPin(_ pin: String) {
         pairingPIN = pin
         pairingStatus = "Enter PIN \(pin) in Settings › Privacy & Security › Developer Mode › Pair with Readipa"
-        updatePairingActivity(pin: pin, status: "Enter this PIN in Settings › Developer Mode")
+        // Alert update: the screen lights up, the activity jumps to the front
+        // (Lock Screen / Dynamic Island / banner) and shows the PIN with sound,
+        // so the code is readable even while the user is inside Settings.
+        updatePairingActivity(
+            pin: pin,
+            status: t(
+                "Enter this PIN in Settings › Developer Mode",
+                "Nhập mã PIN này trong Cài đặt › Developer Mode"
+            ),
+            alert: AlertConfiguration(
+                title: t("Readipa PIN \(pin)", "Readipa mã PIN \(pin)"),
+                body: t(
+                    "Type this code into Settings › Privacy & Security › Developer Mode",
+                    "Nhập mã này trong Cài đặt › Quyền riêng tư & Bảo mật › Developer Mode"
+                ),
+                sound: .default
+            )
+        )
     }
 
     // MARK: - Live Activity
@@ -247,6 +281,11 @@ final class PairingController: ObservableObject {
     nonisolated static var liveActivitiesEnabled: Bool {
         ActivityAuthorizationInfo().areActivitiesEnabled
     }
+
+    /// UI language, mirrored into the Live Activity attributes so the widget
+    /// (which runs in its own process) can follow the in-app picker.
+    private var vietnamese: Bool { LanguageManager.shared.language == .vietnamese }
+    private func t(_ en: String, _ viText: String) -> String { vietnamese ? viText : en }
 
     /// Requests the Live Activity. Safe to call twice — the second call updates
     /// the existing one instead of creating another.
@@ -256,13 +295,19 @@ final class PairingController: ObservableObject {
             return
         }
         if pairingActivity != nil {
-            updatePairingActivity(pin: pin, status: "Waiting for Settings › Developer Mode…")
+            updatePairingActivity(
+                pin: pin,
+                status: t("Waiting for Settings › Developer Mode…", "Đang chờ vào Cài đặt › Developer Mode…")
+            )
             return
         }
-        let attributes = PairingActivityAttributes(deviceName: "Readipa")
+        let attributes = PairingActivityAttributes(
+            deviceName: "Readipa",
+            language: LanguageManager.shared.language.rawValue
+        )
         let state = PairingActivityAttributes.ContentState(
             pin: pin ?? "······",
-            status: "Waiting for Settings › Developer Mode…"
+            status: t("Waiting for Settings › Developer Mode…", "Đang chờ vào Cài đặt › Developer Mode…")
         )
         do {
             pairingActivity = try Activity.request(
@@ -276,7 +321,11 @@ final class PairingController: ObservableObject {
         }
     }
 
-    private func updatePairingActivity(pin: String? = nil, status: String) {
+    private func updatePairingActivity(
+        pin: String? = nil,
+        status: String,
+        alert: AlertConfiguration? = nil
+    ) {
         guard let activity = pairingActivity else {
             // Not started yet (e.g. the PIN arrived first): start it now.
             startPairingActivity(pin: pin)
@@ -287,7 +336,7 @@ final class PairingController: ObservableObject {
             status: status
         )
         Task {
-            await activity.update(.init(state: next, staleDate: nil))
+            await activity.update(.init(state: next, staleDate: nil), alertConfiguration: alert)
         }
     }
 
@@ -296,6 +345,33 @@ final class PairingController: ObservableObject {
         pairingActivity = nil
         Task {
             await activity.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+
+    /// Final alert so the result is visible when the user comes back from
+    /// Settings; the activity then dismisses itself.
+    private func finishPairingActivity(success: Bool) {
+        guard let activity = pairingActivity else { return }
+        pairingActivity = nil
+        let next = PairingActivityAttributes.ContentState(
+            pin: activity.content.state.pin,
+            status: success
+                ? t("Paired ✓ — you can return to Readipa", "Đã ghép đôi ✓ — quay lại Readipa")
+                : t("Pairing failed — open Readipa for details", "Ghép đôi thất bại — mở Readipa để xem chi tiết")
+        )
+        let alert = AlertConfiguration(
+            title: success
+                ? t("Readipa: paired", "Readipa: đã ghép đôi")
+                : t("Readipa: pairing failed", "Readipa: ghép đôi thất bại"),
+            body: success
+                ? t("The device paired successfully.", "Thiết bị đã ghép đôi thành công.")
+                : t("Open Readipa to see the error.", "Mở Readipa để xem lỗi."),
+            sound: .default
+        )
+        Task {
+            await activity.update(.init(state: next, staleDate: nil), alertConfiguration: alert)
+            // Let the system dismiss it even if the app is suspended.
+            await activity.end(nil, dismissalPolicy: .after(Date().addingTimeInterval(6)))
         }
     }
 

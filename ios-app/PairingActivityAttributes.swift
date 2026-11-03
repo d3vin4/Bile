@@ -7,4 +7,8 @@ struct PairingActivityAttributes: ActivityAttributes {
         var status: String
     }
     var deviceName: String
+    /// UI language ("en" / "vi"). The widget extension runs in its own process
+    /// and cannot read the app's UserDefaults, so the language travels with the
+    /// activity attributes.
+    var language: String = "en"
 }
