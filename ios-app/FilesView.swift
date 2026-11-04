@@ -44,7 +44,7 @@ struct FilesView: View {
             } message: {
                 Text(model.alertMessage)
             }
-            .confirmDialog(
+            .confirmationDialog(
                 Text(model.confirmTitle),
                 isPresented: $model.showConfirm,
                 titleVisibility: .visible
