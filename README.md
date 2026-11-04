@@ -22,7 +22,7 @@ your preferred sideloading tool (TrollStore, AltStore, Sideloadly, …).
 
 ### Files
 
-A full browser rooted at `/` on a charcoal dark theme:
+A full browser rooted at `/`:
 
 - Breadcrumb bar — tap any segment to jump; back / forward / up with history
 - Go-to-path sheet with recents, favorites (bookmark any folder)

@@ -30,7 +30,7 @@ struct PlistViewerView: View {
                             Section {
                                 Text(lang("plist.filter.hint"))
                                     .font(.caption2)
-                                    .foregroundStyle(Color.bileText2)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                         NodeRow(
@@ -42,13 +42,9 @@ struct PlistViewerView: View {
                             depth: 0,
                             maxChildren: maxChildren
                         )
-                        .listRowBackground(Color.bileCard)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+
                     }
                     .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.bileBG)
                     .searchable(text: $searchText, prompt: lang("plist.search"))
                 }
             }
@@ -81,7 +77,6 @@ struct PlistViewerView: View {
             }
         }
         .navigationViewStyle(.stack)
-        .preferredColorScheme(.dark)
         .onAppear(perform: load)
     }
 

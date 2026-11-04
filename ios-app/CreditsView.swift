@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Credits: app icon, version, author. Minimal, Liquid Glass.
+/// Credits — Basic dark layout: app info on top, author below.
+/// No glass, no blur, no translucency — plain Form on the system background.
 struct CreditsView: View {
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
@@ -11,38 +12,39 @@ struct CreditsView: View {
     private var avatarURL: URL { URL(string: "https://github.com/\(githubUser).png")! }
 
     private var appIcon: UIImage? {
-        // The real catalog icon — never a placeholder letter.
-        guard let path = Bundle.main.url(forResource: "AppIcon", withExtension: "png") else { return nil }
-        return UIImage(contentsOfFile: path.path)
-            ?? Bundle.main.appIcon
+        guard let url = Bundle.main.url(forResource: "AppIcon", withExtension: "png") else { return nil }
+        return UIImage(contentsOfFile: url.path)
     }
 
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // App identity — the genuine icon, glass-framed.
+            Form {
+                // App information — above the author.
+                Section {
                     VStack(spacing: 10) {
                         if let icon = appIcon {
                             Image(uiImage: icon)
                                 .resizable()
                                 .interpolation(.high)
                                 .aspectRatio(contentMode: .fill)
-                                .frame(width: 96, height: 96)
-                                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                                .readipaGlassCard(cornerRadius: 22)
-                                .shadow(color: .black.opacity(0.35), radius: 12, y: 5)
+                                .frame(width: 88, height: 88)
+                                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                         }
-                        Text("Bile")
-                            .font(.title.bold())
-                        Text(versionLine)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
+                        VStack(spacing: 2) {
+                            Text("Bile")
+                                .font(.title2.bold())
+                            Text(versionLine)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .padding(.top, 10)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                }
 
-                    // Author — avatar beside the handle, one glass card.
-                    HStack(spacing: 14) {
+                // Author.
+                Section(lang("credits.author")) {
+                    HStack(spacing: 12) {
                         AsyncImage(url: avatarURL) { phase in
                             if let image = phase.image {
                                 image.resizable()
@@ -53,40 +55,28 @@ struct CreditsView: View {
                                     .overlay { ProgressView() }
                             }
                         }
-                        .frame(width: 60, height: 60)
+                        .frame(width: 48, height: 48)
                         .clipShape(Circle())
 
-                        VStack(alignment: .leading, spacing: 3) {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text(lang("credits.author"))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                             Text("@\(githubUser)")
-                                .font(.headline.monospaced())
-                            HStack(spacing: 14) {
-                                Link(destination: profileURL) {
-                                    Label(lang("credits.profile"), systemImage: "person.crop.circle")
-                                        .font(.caption.bold())
-                                }
-                                Link(destination: repoURL) {
-                                    Label(lang("credits.repo"), systemImage: "shippingbox")
-                                        .font(.caption.bold())
-                                }
-                            }
+                                .font(.body.monospaced())
                         }
+                        Spacer(minLength: 0)
                     }
-                    .padding(16)
-                    .readipaGlassCard(cornerRadius: 18)
-                    .padding(.horizontal, 24)
+                    .padding(.vertical, 2)
 
-                    Text(lang("credits.license"))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-
-                    Spacer(minLength: 4)
+                    Link(destination: profileURL) {
+                        Label(lang("credits.profile"), systemImage: "person.crop.circle")
+                    }
+                    Link(destination: repoURL) {
+                        Label(lang("credits.repo"), systemImage: "shippingbox")
+                    }
                 }
-                .frame(maxWidth: .infinity)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle(lang("credits"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -96,33 +86,12 @@ struct CreditsView: View {
             }
         }
         .navigationViewStyle(.stack)
+        .preferredColorScheme(.dark)
     }
 
     private var versionLine: String {
         let marketing = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.1"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
         return "v\(marketing) (\(build))"
-    }
-}
-
-// MARK: - Bundle app icon
-
-private extension Bundle {
-    /// The app's own icon image, read back from the bundle by name.
-    var appIcon: UIImage? {
-        guard let iconName = object(forInfoDictionaryKey: "CFBundleIcons") as? [String: Any],
-              let primary = iconName["CFBundlePrimaryIcon"] as? [String: Any],
-              let files = primary["CFBundleIconFiles"] as? [String],
-              let last = files.last else {
-            return nil
-        }
-        let candidates = ["\(last)@3x.png", "\(last)@2x.png", "\(last).png", last]
-        for name in candidates {
-            if let url = url(forResource: name, withExtension: nil),
-               let image = UIImage(contentsOfFile: url.path) {
-                return image
-            }
-        }
-        return nil
     }
 }

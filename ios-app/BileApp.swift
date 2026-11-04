@@ -10,6 +10,7 @@ struct BileApp: App {
             RootView()
                 .environmentObject(state)
                 .environmentObject(lang)
+                .tint(.blue)
         }
     }
 }

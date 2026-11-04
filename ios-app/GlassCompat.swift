@@ -64,15 +64,3 @@ struct StatusChip: View {
         .readipaGlassCapsule()
     }
 }
-
-// MARK: - Bile dark palette
-
-// The Files tab lives on a charcoal theme of its own — near-black background,
-// raised card surfaces — independent of the system appearance.
-extension Color {
-    static let bileBG = Color(red: 0.035, green: 0.035, blue: 0.043)     // #09090B
-    static let bileCard = Color(red: 0.094, green: 0.094, blue: 0.110)   // #18181C
-    static let bileCardHi = Color(red: 0.129, green: 0.129, blue: 0.153) // #212127
-    static let bileLine = Color(red: 0.180, green: 0.180, blue: 0.208)   // #2E2E35
-    static let bileText2 = Color(red: 0.620, green: 0.627, blue: 0.670)  // #9EA0AB
-}

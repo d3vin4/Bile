@@ -19,7 +19,7 @@ struct FilesView: View {
                 content
                 footer
             }
-            .background(Color.bileBG.ignoresSafeArea())
+
             .navigationTitle(model.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
@@ -59,8 +59,6 @@ struct FilesView: View {
                 Text(model.confirmMessage)
             }
             .onAppear { model.attach(state: state, lang: lang) }
-            .preferredColorScheme(.dark)
-            .tint(.blue)
             .onReceive(NotificationCenter.default.publisher(for: .openPathInFiles)) { note in
                 if let target = note.object as? String {
                     state.selectedTab = .files
@@ -92,9 +90,8 @@ struct FilesView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
             }
-            .background(Color.bileBG)
+            .background(.ultraThinMaterial)
         }
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.bileLine).frame(height: 0.5) }
     }
 
     private func crumb(_ path: String, label: String, id: String,
@@ -135,25 +132,12 @@ struct FilesView: View {
             ForEach(model.displayed) { entry in
                 FileRow(entry: entry, selected: model.selection.contains(entry.path),
                         selecting: model.isSelecting)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(
-                        model.selection.contains(entry.path)
-                            ? AnyShapeStyle(Color.blue.opacity(0.22))
-                            : AnyShapeStyle(Color.bileCard),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
                     .contentShape(Rectangle())
                     .onTapGesture { model.tap(entry) }
                     .contextMenu { entryMenu(entry) }
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10))
             }
         }
         .listStyle(.plain)
-        .listRowSpacing(4)
-        .scrollContentBackground(.hidden)
         .refreshable { model.reload() }
         .overlay { emptyOrError }
     }
@@ -172,17 +156,13 @@ struct FilesView: View {
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
                     }
-                    .padding(8)
+                    .padding(6)
                     .frame(maxWidth: .infinity)
                     .background(
                         model.selection.contains(entry.path)
-                            ? AnyShapeStyle(Color.blue.opacity(0.22))
-                            : AnyShapeStyle(Color.bileCard),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.bileLine, lineWidth: 0.5)
+                            ? AnyShapeStyle(Color.accentColor.opacity(0.18))
+                            : AnyShapeStyle(Color.clear),
+                        in: RoundedRectangle(cornerRadius: 10)
                     )
                     .contentShape(Rectangle())
                     .onTapGesture { model.tap(entry) }
@@ -211,12 +191,6 @@ struct FilesView: View {
                                 .truncationMode(.middle)
                         }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Color.bileCard,
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    )
                     .contentShape(Rectangle())
                     .onTapGesture {
                         let entry = FileEntry(entryForPath: path)
@@ -229,12 +203,10 @@ struct FilesView: View {
             } header: {
                 HStack {
                     Text("\(model.searchResults.count) matches")
-                    .foregroundStyle(Color.bileText2)
                     Spacer()
                     if model.isSearching { ProgressView() }
                     Button(lang("search.close")) { model.exitSearch() }
                         .font(.caption)
-                        .foregroundStyle(.blue)
                 }
             }
         }
@@ -281,9 +253,8 @@ struct FilesView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.bileBG)
-        .overlay(alignment: .top) { Rectangle().fill(Color.bileLine).frame(height: 0.5) }
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial)
     }
 
     private var statusBar: some View {
@@ -321,7 +292,6 @@ struct FilesView: View {
         HStack(spacing: 10) {
             Text(lang("n.selected").replacingOccurrences(of: "%d", with: "\(model.selection.count)"))
                 .font(.caption.bold())
-                .foregroundStyle(Color.bileText2)
             Spacer(minLength: 0)
             actionButton("square.and.arrow.up", lang("share")) { model.shareSelection() }
             actionButton("doc.on.doc", lang("copy")) { model.copySelection(cut: false) }
@@ -341,8 +311,8 @@ struct FilesView: View {
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .frame(width: 38, height: 34)
-                    .background(Color.bileCard, in: RoundedRectangle(cornerRadius: 9))
             }
+            .buttonStyle(.bordered)
             Button(lang("done")) { model.exitSelection() }
                 .font(.caption.bold())
         }
@@ -355,8 +325,8 @@ struct FilesView: View {
         Button(action: action) {
             Image(systemName: system)
                 .frame(width: 38, height: 34)
-                .background(Color.bileCard, in: RoundedRectangle(cornerRadius: 9))
         }
+        .buttonStyle(.bordered)
         .accessibilityLabel(label)
     }
 
@@ -574,44 +544,25 @@ struct FileGlyph: View {
 
     var body: some View {
         let isLink = entry?.isLink ?? false
-        let tint = Self.tint(for: entry)
         Image(systemName: entry?.icon ?? "doc")
             .font(.system(size: size * 0.85, weight: .regular))
-            .foregroundStyle(tint)
+            .foregroundStyle(Self.tint(for: entry))
             .frame(width: size + 10, height: size + 10)
-            .background(Color.bileCard, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.bileLine, lineWidth: 0.5)
-            )
             .overlay(alignment: .bottomTrailing) {
                 if isLink {
                     Image(systemName: "link.circle.fill")
                         .font(.caption2)
                         .foregroundStyle(.purple)
-                        .background(Circle().fill(Color.bileBG))
                         .offset(x: 3, y: 3)
                 }
             }
     }
 
-    /// Type colouring: stock system colours, no custom palette.
+    /// One unified palette: folders carry the app tint, files stay neutral.
     static func tint(for entry: FileEntry?) -> Color {
-        guard let entry else { return .gray }
-        if entry.isLink { return .purple }
+        guard let entry else { return .secondary }
         if entry.isDir { return .blue }
-        switch entry.ext {
-        case "png", "jpg", "jpeg", "gif", "heic", "heif", "webp", "bmp", "tiff": return .red
-        case "mp4", "mov", "m4v", "avi", "mkv": return .red
-        case "mp3", "m4a", "wav", "aac", "flac", "ogg": return .orange
-        case "plist", "json", "xml", "yaml", "yml", "ini", "cfg", "conf": return .teal
-        case "h", "m", "swift", "c", "cpp", "rs", "py", "js", "ts", "sh", "lua": return .green
-        case "sqlite", "sqlite3", "db", "sqlite-wal", "sqlite-shm": return .indigo
-        case "zip", "gz", "tar", "bz2", "xz", "ipa", "deb", "aar": return .purple
-        case "pdf": return .pink
-        case "dylib", "framework", "bundle", "app", "appex": return .cyan
-        case "ttf", "otf": return .mint
-        default: return .gray
-        }
+        if entry.isLink { return .purple }
+        return .secondary
     }
 }
