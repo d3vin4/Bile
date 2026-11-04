@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Assets/icon-1024.png" width="128" alt="Bile icon" />
+</p>
+
 # Bile
 
 A fast, escape-free file manager for iOS.
