@@ -145,15 +145,6 @@ pub(crate) fn human_bytes(bytes: u64) -> String {
     }
 }
 
-/// FileService scope name for a container root.
-pub(crate) fn fs_scope(container_path: &str) -> &'static str {
-    if container_path.contains("/Shared/AppGroup") {
-        "appGroup"
-    } else {
-        "application"
-    }
-}
-
 fn entry_json(name: &str, info: &idevice::afc::FileInfo) -> serde_json::Value {
     json!({
         "name": name,
@@ -477,10 +468,37 @@ async fn stage_minimal(
 }
 
 /// Run one AirTraffic sync session and complete a single asset move.
+/// One relocation the AirTraffic sync should perform: `identifier` is the
+/// staged asset's path relative to Airlock/Book, `dst` is where FileComplete
+/// should place it (relative to /var/mobile/Media).
+pub(crate) struct AtcMove {
+    pub(crate) identifier: String,
+    pub(crate) dst: String,
+}
+
 async fn atc_file_complete(
     tunnel: &mut AppDeviceTunnel,
     asset_id: &str,
     dest: &str,
+    logger: &Logger,
+) -> Result<(), String> {
+    atc_relocate_rows(
+        tunnel,
+        &[AtcMove {
+            identifier: asset_id.to_string(),
+            dst: dest.to_string(),
+        }],
+        logger,
+    )
+    .await
+}
+
+/// Run one full AirTraffic sync that relocates every offered row. FileComplete
+/// messages are sent in paced pairs (an initial round, then one retry round),
+/// mirroring how the stock Books sync client settles relocations.
+async fn atc_relocate_rows(
+    tunnel: &mut AppDeviceTunnel,
+    rows: &[AtcMove],
     logger: &Logger,
 ) -> Result<(), String> {
     let mut atc = tunnel.connect_service("com.apple.atc", logger).await?;
@@ -530,7 +548,7 @@ async fn atc_file_complete(
     let mut host_info = plist::Dictionary::new();
     host_info.insert("Type".into(), plist::Value::String("iTunes".into()));
     host_info.insert("Version".into(), plist::Value::String("13.7.0.161".into()));
-    host_info.insert("MacOSVersion".into(), plist::Value::String("15.0".into()));
+    host_info.insert("MacOSVersion".into(), plist::Value::String("27.0".into()));
     host_info.insert(
         "SyncHostName".into(),
         plist::Value::String("readipa".into()),
@@ -689,9 +707,14 @@ async fn atc_file_complete(
     if !manifest_seen {
         return Err("AirTraffic: AssetManifest not observed".into());
     }
-    if !offered.iter().any(|id| id == asset_id) {
+
+    let wanted: Vec<&AtcMove> = rows
+        .iter()
+        .filter(|row| offered.iter().any(|id| *id == row.identifier))
+        .collect();
+    if wanted.is_empty() {
         return Err(format!(
-            "the device did not offer '{asset_id}' for download, so it ignored the move. Offered: {}",
+            "the device did not offer any of the staged assets for download, so it ignored the move. Offered: {}",
             if offered.is_empty() {
                 "nothing".to_string()
             } else {
@@ -699,16 +722,44 @@ async fn atc_file_complete(
             }
         ));
     }
+    let skipped: Vec<String> = rows
+        .iter()
+        .filter(|row| !offered.iter().any(|id| *id == row.identifier))
+        .map(|row| row.identifier.clone())
+        .collect();
+    if !skipped.is_empty() {
+        logger.log(format!(
+            "airlift: device skipped {} staged asset(s): {}",
+            skipped.len(),
+            skipped.join(", ")
+        ));
+    }
 
-    let mut params = plist::Dictionary::new();
-    params.insert("AssetID".into(), plist::Value::String(asset_id.to_string()));
-    params.insert("Dataclass".into(), plist::Value::String("Book".into()));
-    params.insert("AssetPath".into(), plist::Value::String(dest.to_string()));
-    exploit::send_atc_dict(
-        &mut atc,
-        &exploit::make_atc_msg("FileComplete", 1, Some(params)),
-    )
-    .await?;
+    // Paced pairs: an initial round, then one retry round. The stock sync
+    // client sends FileComplete more than once per asset, and single-shot
+    // messages have been observed to be acknowledged but not acted on.
+    for round in 0..2 {
+        for row in &wanted {
+            let mut params = plist::Dictionary::new();
+            params.insert(
+                "AssetID".into(),
+                plist::Value::String(row.identifier.clone()),
+            );
+            params.insert("Dataclass".into(), plist::Value::String("Book".into()));
+            params.insert("AssetPath".into(), plist::Value::String(row.dst.clone()));
+            exploit::send_atc_dict(
+                &mut atc,
+                &exploit::make_atc_msg("FileComplete", 1, Some(params)),
+            )
+            .await?;
+            if round == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            }
+        }
+        if round == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        }
+    }
 
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     drop(atc);
@@ -1526,7 +1577,7 @@ async fn fs_list_async(
                     std::time::Duration::from_secs(25),
                     file_service::list_entries(
                         &mut fs_tunnel,
-                        fs_scope(&container_path),
+                        &container_path,
                         &bundle_id,
                         &rel_path,
                         logger,
@@ -1838,7 +1889,7 @@ async fn fs_stat_async(
                     std::time::Duration::from_secs(30),
                     file_service::stat_entry(
                         &mut fs_tunnel,
-                        fs_scope(&container_path),
+                        &container_path,
                         &bundle_id,
                         &rel_path,
                         &name,
@@ -1965,7 +2016,7 @@ async fn fs_read_async(
                     std::time::Duration::from_secs(180),
                     file_service::read_to_local(
                         &mut fs_tunnel,
-                        fs_scope(&container_path),
+                        &container_path,
                         &bundle_id,
                         &rel_path,
                         &dest_local_path,
@@ -2172,7 +2223,7 @@ async fn fs_write_async(
                     std::time::Duration::from_secs(300),
                     file_service::write_from_local(
                         &mut fs_tunnel,
-                        fs_scope(&container_path),
+                        &container_path,
                         &bundle_id,
                         &rel_path,
                         &src_local_path,
@@ -2316,7 +2367,7 @@ async fn fs_mkdir_async(
                     std::time::Duration::from_secs(60),
                     file_service::mkdir(
                         &mut fs_tunnel,
-                        fs_scope(&container_path),
+                        &container_path,
                         &bundle_id,
                         &rel_path,
                         logger,
@@ -2436,7 +2487,7 @@ async fn fs_remove_async(
                     std::time::Duration::from_secs(300),
                     file_service::remove_tree(
                         &mut fs_tunnel,
-                        fs_scope(&container_path),
+                        &container_path,
                         &bundle_id,
                         &rel_path,
                         logger,
@@ -2559,7 +2610,7 @@ async fn fs_rename_async(
                     std::time::Duration::from_secs(120),
                     file_service::rename(
                         &mut fs_tunnel,
-                        fs_scope(&container_path),
+                        &container_path,
                         &bundle_id,
                         &old_rel,
                         &new_rel,
@@ -3236,14 +3287,9 @@ async fn probe_access_async(
     }
 
     // 1a. Core Device FileService (iOS 26+): the sanctioned container browser.
-    let fs_scope = if container_path.contains("/Shared/AppGroup") {
-        "appGroup"
-    } else {
-        "application"
-    };
     let fs_probe = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
-        crate::file_service::probe_service(&mut tunnel, fs_scope, &bundle_id, logger),
+        std::time::Duration::from_secs(45),
+        crate::file_service::probe_service(&mut tunnel, &container_path, &bundle_id, logger),
     )
     .await;
     match fs_probe {
@@ -3336,9 +3382,201 @@ async fn probe_access_async(
             evidence.push(format!("write probe: {e}"));
         }
     }
+    // Where did the probe file actually go? A silent relocation into Airlock
+    // (or any other Media folder) is visible here even when the destination we
+    // asked for was refused.
+    {
+        let mut found: Vec<String> = Vec::new();
+        if let Ok(names) = media_list_root(&mut afc).await {
+            for n in names {
+                if n.contains(&token) {
+                    found.push(format!("Media/{n}"));
+                }
+            }
+        }
+        for dir in ["Airlock", "Airlock/Book"] {
+            if let Ok(names) = afc.list_dir(dir).await {
+                for n in names {
+                    if n.contains(&token) {
+                        found.push(format!("{dir}/{n}"));
+                    }
+                }
+            }
+        }
+        if found.is_empty() {
+            evidence.push("write probe trace: the payload is nowhere in Media".into());
+        } else {
+            evidence.push(format!("write probe trace: found in {}", found.join(", ")));
+        }
+    }
     let _ = afc.remove(&media_probe).await;
 
+    // 4. 3105-style round trip on a regenerable system file: copy the
+    // container's metadata plist out with AirTraffic, read it, move it back.
+    // Proves (or refutes) copy-out and copy-in on this iOS build without ever
+    // touching app data — and requires the risky-moves opt-in like any other
+    // container relocation.
+    if risky_moves_allowed() {
+        for line in atc_round_trip_probe(&mut tunnel, &mut afc, &container_path, logger).await {
+            evidence.push(line);
+        }
+    } else {
+        evidence.push(
+            "atc round trip: skipped (enable \"Allow risky moves\" to test AirTraffic relocations)"
+                .into(),
+        );
+    }
+
     Ok(verdict("none", &evidence))
+}
+
+/// Move `.com.apple.mobile_container_manager.metadata.plist` out of the
+/// container with AirTraffic, read it through AFC, then move it back. The file
+/// is system-generated (bundle id + store kind) so a failed restore never
+/// loses app data; a failed copy-in leaves the copy in Media as a recoverable
+/// leftover instead of deleting it.
+async fn atc_round_trip_probe(
+    tunnel: &mut AppDeviceTunnel,
+    afc: &mut AfcClient,
+    container_path: &str,
+    logger: &Logger,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let meta = ".com.apple.mobile_container_manager.metadata.plist";
+    let src = format!("{}/{}", container_path.trim_end_matches('/'), meta);
+    let token = exploit::random_hex(6);
+    let recovered = format!("airlift-recovered-{token}");
+    let stage = format!("airlift-src-{token}");
+    let state = snapshot_media_state(afc).await;
+    let archive = match build_minimal_archive() {
+        Ok(a) => a,
+        Err(e) => {
+            out.push(format!("atc round trip: archive build failed: {e}"));
+            return out;
+        }
+    };
+    let id_out = posix_rel(&src, AIRLOCK_ROOT);
+
+    let session_one = async {
+        stage_minimal(tunnel, &stage, &archive, logger).await?;
+        let _ = afc.mk_dir("Airlock").await;
+        let _ = afc.mk_dir("Airlock/Book").await;
+        if !dir_existed(&state, "Books") {
+            let _ = afc.mk_dir("Books").await;
+        }
+        if !dir_existed(&state, "Books/Sync") {
+            let _ = afc.mk_dir("Books/Sync").await;
+        }
+        {
+            let books_plist = build_books_plist(std::slice::from_ref(&id_out))?;
+            let mut fd = afc
+                .open("Books/Sync/Books.plist", AfcFopenMode::WrOnly)
+                .await
+                .map_err(|e| format!("Books.plist write: {e:?}"))?;
+            fd.write_entire(&books_plist)
+                .await
+                .map_err(|e| format!("Books.plist write: {e:?}"))?;
+            let _ = fd.close().await;
+        }
+        atc_relocate_rows(
+            tunnel,
+            &[AtcMove {
+                identifier: id_out.clone(),
+                dst: recovered.clone(),
+            }],
+            logger,
+        )
+        .await
+    }
+    .await;
+
+    if let Err(e) = session_one {
+        out.push(format!("atc copy-out: {e}"));
+        restore_media_state(afc, &state).await;
+        let _ = remove_tree_safe(afc, &stage).await;
+        return out;
+    }
+
+    if !wait_present(afc, &recovered, 16).await {
+        out.push(
+            "atc copy-out: refused — the device never relocated the container file into Media"
+                .to_string(),
+        );
+        restore_media_state(afc, &state).await;
+        let _ = remove_tree_safe(afc, &stage).await;
+        return out;
+    }
+
+    let bytes = {
+        let mut buf = Vec::new();
+        let read = async {
+            let mut fd = afc
+                .open(&recovered, AfcFopenMode::RdOnly)
+                .await
+                .map_err(|e| format!("{e:?}"))?;
+            let r = fd.read_to_end(&mut buf).await;
+            let _ = fd.close().await;
+            r.map_err(|e| format!("{e:?}"))
+        }
+        .await;
+        match read {
+            Ok(_) => buf,
+            Err(e) => {
+                out.push(format!("atc copy-out: landed but could not be read: {e}"));
+                restore_media_state(afc, &state).await;
+                let _ = remove_tree_safe(afc, &stage).await;
+                return out;
+            }
+        }
+    };
+    out.push(format!(
+        "atc copy-out: WORKS — {} bytes recovered through AirTraffic",
+        bytes.len()
+    ));
+
+    // Move the file back into the container (the second, "return" sync).
+    let id_back = posix_rel(&format!("{MEDIA_ROOT}{recovered}"), AIRLOCK_ROOT);
+    let session_two = async {
+        {
+            let books_plist = build_books_plist(std::slice::from_ref(&id_back))?;
+            let mut fd = afc
+                .open("Books/Sync/Books.plist", AfcFopenMode::WrOnly)
+                .await
+                .map_err(|e| format!("Books.plist write: {e:?}"))?;
+            fd.write_entire(&books_plist)
+                .await
+                .map_err(|e| format!("Books.plist write: {e:?}"))?;
+            let _ = fd.close().await;
+        }
+        atc_relocate_rows(
+            tunnel,
+            &[AtcMove {
+                identifier: id_back.clone(),
+                dst: src.clone(),
+            }],
+            logger,
+        )
+        .await
+    }
+    .await;
+
+    let _ = remove_tree_safe(afc, &stage).await;
+    if session_two.is_ok() && wait_absent(afc, &recovered, 16).await {
+        out.push("atc copy-in: WORKS — the file moved back into the container".to_string());
+        restore_media_state(afc, &state).await;
+    } else {
+        if let Err(e) = session_two {
+            out.push(format!("atc copy-in: {e}"));
+        } else {
+            out.push(
+                "atc copy-in: accepted but did not settle — the copy is still in Media".to_string(),
+            );
+        }
+        out.push(format!(
+            "atc copy-in: the recovered copy is kept at Media/{recovered} (recoverable, nothing lost)"
+        ));
+    }
+    out
 }
 
 fn verdict(level: &str, evidence: &[String]) -> String {

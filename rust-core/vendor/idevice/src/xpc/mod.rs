@@ -107,6 +107,49 @@ impl<R: ReadWrite> RemoteXpcClient<R> {
         self.recv_from_channel(ROOT_CHANNEL).await
     }
 
+    /// Wait for a reply on either the reply or the root channel. CoreDevice
+    /// services answer `CreateSession` on the reply channel but every later
+    /// command on the root channel, so callers must not pin one.
+    pub async fn recv_any(&mut self) -> Result<plist::Value, IdeviceError> {
+        loop {
+            // Drain any complete message already buffered for either channel.
+            for channel in [REPLY_CHANNEL, ROOT_CHANNEL] {
+                let decoded = {
+                    let buf = self.partial.entry(channel).or_default();
+                    match XPCMessage::decode(buf) {
+                        Ok(msg) => {
+                            let consumed = (XPC_WRAPPER_LEN + xpc_body_len(buf)).min(buf.len());
+                            buf.drain(..consumed);
+                            Some(msg)
+                        }
+                        Err(IdeviceError::CdTunnel(CdTunnelError::SizeMismatch))
+                        | Err(IdeviceError::NotEnoughBytes(..)) => None,
+                        Err(e) => return Err(e),
+                    }
+                };
+                if let Some(msg) = decoded {
+                    match msg.message {
+                        // Skip empty-dictionary keepalives and bodyless frames.
+                        Some(inner) => {
+                            if let Some(d) = inner.as_dictionary()
+                                && d.is_empty()
+                            {
+                                continue;
+                            }
+                            return Ok(inner.to_plist());
+                        }
+                        None => continue,
+                    }
+                }
+            }
+            let (channel, chunk) = self
+                .h2_client
+                .read_any(&[REPLY_CHANNEL, ROOT_CHANNEL])
+                .await?;
+            self.partial.entry(channel).or_default().extend(chunk);
+        }
+    }
+
     async fn recv_from_channel(&mut self, channel: u32) -> Result<plist::Value, IdeviceError> {
         loop {
             // Try to decode a whole message from what's already buffered before

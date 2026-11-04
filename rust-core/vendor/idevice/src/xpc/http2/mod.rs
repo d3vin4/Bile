@@ -173,6 +173,23 @@ impl<R: ReadWrite> Http2Client<R> {
         }
     }
 
+    /// Return the next buffered frame for any of `streams`, pumping the wire as
+    /// needed. CoreDevice services answer `CreateSession` on one stream and
+    /// every later command on the other, so callers cannot pin a single one.
+    pub async fn read_any(
+        &mut self,
+        streams: &[u32],
+    ) -> Result<(u32, Vec<u8>), IdeviceError> {
+        loop {
+            for stream_id in streams {
+                if let Some(d) = self.cache.get_mut(stream_id).and_then(|c| c.pop_front()) {
+                    return Ok((*stream_id, d));
+                }
+            }
+            self.pump().await?;
+        }
+    }
+
     /// Read and handle a single inbound frame: ack SETTINGS (applying any
     /// `InitialWindowSize` change), apply WINDOW_UPDATEs to our send windows,
     /// replenish the peer's receive window for inbound DATA and buffer that DATA

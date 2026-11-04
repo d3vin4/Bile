@@ -68,6 +68,11 @@ pub(crate) struct Session {
     session: String,
 }
 
+/// The container UUID is the last path component of the container root.
+fn uuid_of(container_path: &str) -> &str {
+    container_path.rsplit('/').next().unwrap_or("")
+}
+
 impl Session {
     pub(crate) async fn open(
         tunnel: &mut AppDeviceTunnel,
@@ -75,8 +80,71 @@ impl Session {
         identifier: &str,
         logger: &Logger,
     ) -> Result<Self, String> {
+        Self::open_as(tunnel, domain, identifier, "mobile", logger).await
+    }
+
+    /// Open a session trying the identifier first and the container's UUID
+    /// second: some iOS builds resolve one but not the other.
+    pub(crate) async fn open_for_container(
+        tunnel: &mut AppDeviceTunnel,
+        domain: Domain,
+        identifier: &str,
+        container_path: &str,
+        allow_root: bool,
+        logger: &Logger,
+    ) -> Result<(Self, String), String> {
+        match Self::open_as(tunnel, domain, identifier, "mobile", logger).await {
+            Ok(session) => return Ok((session, identifier.to_string())),
+            Err(first) => {
+                let uuid = uuid_of(container_path);
+                if !uuid.is_empty() && uuid != identifier {
+                    logger.log(format!(
+                        "file_service: identifier refused ({first}); retrying with the container UUID"
+                    ));
+                    match Self::open_as(tunnel, domain, uuid, "mobile", logger).await {
+                        Ok(session) => return Ok((session, uuid.to_string())),
+                        Err(second) => {
+                            if !allow_root {
+                                return Err(format!("{first}; uuid fallback: {second}"));
+                            }
+                            logger.log(format!(
+                                "file_service: uuid refused ({second}); retrying as user 'root' (read-only use)"
+                            ));
+                            return match Self::open_as(tunnel, domain, identifier, "root", logger)
+                                .await
+                            {
+                                Ok(session) => Ok((session, "root".to_string())),
+                                Err(third) => {
+                                    Err(format!("{first}; uuid: {second}; root: {third}"))
+                                }
+                            };
+                        }
+                    }
+                }
+                if !allow_root {
+                    return Err(first);
+                }
+                logger.log(
+                    "file_service: identifier refused; retrying as user 'root' (read-only use)"
+                        .to_string(),
+                );
+                match Self::open_as(tunnel, domain, identifier, "root", logger).await {
+                    Ok(session) => Ok((session, "root".to_string())),
+                    Err(second) => Err(format!("{first}; root: {second}")),
+                }
+            }
+        }
+    }
+
+    async fn open_as(
+        tunnel: &mut AppDeviceTunnel,
+        domain: Domain,
+        identifier: &str,
+        user: &str,
+        logger: &Logger,
+    ) -> Result<Self, String> {
         logger.log(format!(
-            "file_service: connecting to {CTRL_SERVICE} (domain {} id {identifier})…",
+            "file_service: connecting to {CTRL_SERVICE} (domain {} id {identifier} user {user})…",
             domain as u64
         ));
         match tunnel.rsd_service_features(CTRL_SERVICE) {
@@ -106,7 +174,7 @@ impl Session {
                     XPCObject::String(identifier.into()),
                 ),
                 ("Session".to_string(), XPCObject::String(String::new())),
-                ("User".to_string(), XPCObject::String("mobile".into())),
+                ("User".to_string(), XPCObject::String(user.into())),
             ]),
         )
         .await?;
@@ -423,8 +491,10 @@ async fn send_dict<R: idevice::ReadWrite>(
         .send_object(XPCObject::Dictionary(dict), true)
         .await
         .map_err(|e| format!("FileService send failed: {e:?}"))?;
+    // CreateSession is answered on the reply channel, later commands on the
+    // root channel; wait on both.
     let value = client
-        .recv()
+        .recv_any()
         .await
         .map_err(|e| format!("FileService reply failed: {e:?}"))?;
     let reply = value.as_dictionary();
@@ -522,13 +592,15 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 
 pub(crate) async fn list_entries(
     tunnel: &mut AppDeviceTunnel,
-    scope: &str,
+    container_path: &str,
     identifier: &str,
     directory: &str,
     logger: &Logger,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let domain = Domain::from_name(scope)?;
-    let mut session = Session::open(tunnel, domain, identifier, logger).await?;
+    let domain = Domain::for_container(container_path);
+    let (mut session, _) =
+        Session::open_for_container(tunnel, domain, identifier, container_path, true, logger)
+            .await?;
     let names = session.list(directory).await?;
     let base = directory.trim_end_matches('/');
     let mut entries = Vec::new();
@@ -568,14 +640,16 @@ pub(crate) async fn list_entries(
 
 pub(crate) async fn stat_entry(
     tunnel: &mut AppDeviceTunnel,
-    scope: &str,
+    container_path: &str,
     identifier: &str,
     path: &str,
     name: &str,
     logger: &Logger,
 ) -> Result<serde_json::Value, String> {
-    let domain = Domain::from_name(scope)?;
-    let mut session = Session::open(tunnel, domain, identifier, logger).await?;
+    let domain = Domain::for_container(container_path);
+    let (mut session, _) =
+        Session::open_for_container(tunnel, domain, identifier, container_path, true, logger)
+            .await?;
     let attrs = session.attributes(path).await?;
     Ok(json!({
         "name": name,
@@ -589,15 +663,17 @@ pub(crate) async fn stat_entry(
 
 pub(crate) async fn read_to_local(
     tunnel: &mut AppDeviceTunnel,
-    scope: &str,
+    container_path: &str,
     identifier: &str,
     path: &str,
     dest: &str,
     logger: &Logger,
 ) -> Result<u64, String> {
     use tokio::io::AsyncWriteExt;
-    let domain = Domain::from_name(scope)?;
-    let mut session = Session::open(tunnel, domain, identifier, logger).await?;
+    let domain = Domain::for_container(container_path);
+    let (mut session, _) =
+        Session::open_for_container(tunnel, domain, identifier, container_path, true, logger)
+            .await?;
     let fd = session.open_file(path, 0, 0o644).await?;
     let mut file = tokio::fs::File::create(dest)
         .await
@@ -622,49 +698,57 @@ pub(crate) async fn read_to_local(
 
 pub(crate) async fn mkdir(
     tunnel: &mut AppDeviceTunnel,
-    scope: &str,
+    container_path: &str,
     identifier: &str,
     path: &str,
     logger: &Logger,
 ) -> Result<(), String> {
-    let domain = Domain::from_name(scope)?;
-    let mut session = Session::open(tunnel, domain, identifier, logger).await?;
+    let domain = Domain::for_container(container_path);
+    let (mut session, _) =
+        Session::open_for_container(tunnel, domain, identifier, container_path, false, logger)
+            .await?;
     session.create_directory(path).await
 }
 
 pub(crate) async fn remove(
     tunnel: &mut AppDeviceTunnel,
-    scope: &str,
+    container_path: &str,
     identifier: &str,
     path: &str,
     logger: &Logger,
 ) -> Result<(), String> {
-    let domain = Domain::from_name(scope)?;
-    let mut session = Session::open(tunnel, domain, identifier, logger).await?;
+    let domain = Domain::for_container(container_path);
+    let (mut session, _) =
+        Session::open_for_container(tunnel, domain, identifier, container_path, false, logger)
+            .await?;
     session.remove(path).await
 }
 
 pub(crate) async fn remove_tree(
     tunnel: &mut AppDeviceTunnel,
-    scope: &str,
+    container_path: &str,
     identifier: &str,
     path: &str,
     logger: &Logger,
 ) -> Result<(), String> {
-    let domain = Domain::from_name(scope)?;
-    let mut session = Session::open(tunnel, domain, identifier, logger).await?;
+    let domain = Domain::for_container(container_path);
+    let (mut session, _) =
+        Session::open_for_container(tunnel, domain, identifier, container_path, false, logger)
+            .await?;
     session.remove_tree(path, logger).await
 }
 
 pub(crate) async fn exists(
     tunnel: &mut AppDeviceTunnel,
-    scope: &str,
+    container_path: &str,
     identifier: &str,
     path: &str,
     logger: &Logger,
 ) -> Result<bool, String> {
-    let domain = Domain::from_name(scope)?;
-    let mut session = Session::open(tunnel, domain, identifier, logger).await?;
+    let domain = Domain::for_container(container_path);
+    let (mut session, _) =
+        Session::open_for_container(tunnel, domain, identifier, container_path, true, logger)
+            .await?;
     match session.attributes(path).await {
         Ok(_) => Ok(true),
         Err(e) if e.contains("No such file") || e.contains("does not exist") => Ok(false),
@@ -674,49 +758,116 @@ pub(crate) async fn exists(
 
 pub(crate) async fn rename(
     tunnel: &mut AppDeviceTunnel,
-    scope: &str,
+    container_path: &str,
     identifier: &str,
     old_path: &str,
     new_path: &str,
     logger: &Logger,
 ) -> Result<(), String> {
-    let domain = Domain::from_name(scope)?;
-    let mut session = Session::open(tunnel, domain, identifier, logger).await?;
+    let domain = Domain::for_container(container_path);
+    let (mut session, _) =
+        Session::open_for_container(tunnel, domain, identifier, container_path, false, logger)
+            .await?;
     session.rename(old_path, new_path).await
 }
 
 pub(crate) async fn write_from_local(
     tunnel: &mut AppDeviceTunnel,
-    scope: &str,
+    container_path: &str,
     identifier: &str,
     path: &str,
     src_local_path: &str,
     logger: &Logger,
 ) -> Result<u64, String> {
     let data = std::fs::read(src_local_path).map_err(|e| format!("read {src_local_path}: {e}"))?;
-    let domain = Domain::from_name(scope)?;
-    let mut session = Session::open(tunnel, domain, identifier, logger).await?;
+    let domain = Domain::for_container(container_path);
+    let (mut session, _) =
+        Session::open_for_container(tunnel, domain, identifier, container_path, false, logger)
+            .await?;
     session.write_new_file(path, &data, 0o644).await?;
     Ok(data.len() as u64)
 }
 
-/// Probe used by the automatic access check: connect, open a session, list the
-/// container root, and report what happened.
+/// Probe used by the automatic access check. Tries, in order:
+///   1. the identifier (bundle id / group id) as user "mobile";
+///   2. the container UUID as user "mobile" (open_for_container does both);
+///   3. the identifier as user "root";
+/// and always finishes with a `temporary`-domain control session, so the log
+/// can tell "the service works but iOS refuses this container's lookup" apart
+/// from "the service is unusable". This mirrors what the stock file browser
+/// apps see on iOS 27 for App Store containers.
 pub(crate) async fn probe_service(
     tunnel: &mut AppDeviceTunnel,
-    scope: &str,
+    container_path: &str,
     identifier: &str,
     logger: &Logger,
 ) -> Result<String, String> {
-    if identifier.is_empty() {
-        return Err("no identifier for FileService".into());
+    let mut tried: Vec<String> = Vec::new();
+    let domain = Domain::for_container(container_path);
+
+    if !identifier.is_empty() {
+        match Session::open_as(tunnel, domain, identifier, "mobile", logger).await {
+            Ok(mut session) => match session.list(".").await {
+                Ok(names) => {
+                    return Ok(format!(
+                        "fileservice: granted via '{identifier}' ({} entries in the container root)",
+                        names.len()
+                    ));
+                }
+                Err(e) => tried.push(format!(
+                    "id '{identifier}': session ok but list failed: {e}"
+                )),
+            },
+            Err(e) => tried.push(format!("id '{identifier}': {e}")),
+        }
+
+        let uuid = uuid_of(container_path);
+        if !uuid.is_empty() && uuid != identifier {
+            match Session::open_as(tunnel, domain, uuid, "mobile", logger).await {
+                Ok(mut session) => match session.list(".").await {
+                    Ok(names) => {
+                        return Ok(format!(
+                            "fileservice: granted via container UUID '{uuid}' ({} entries)",
+                            names.len()
+                        ));
+                    }
+                    Err(e) => tried.push(format!("uuid '{uuid}': session ok but list failed: {e}")),
+                },
+                Err(e) => tried.push(format!("uuid '{uuid}': {e}")),
+            }
+        }
+
+        match Session::open_as(tunnel, domain, identifier, "root", logger).await {
+            Ok(mut session) => match session.list(".").await {
+                Ok(names) => {
+                    return Ok(format!(
+                        "fileservice: granted as user 'root' via '{identifier}' ({} entries)",
+                        names.len()
+                    ));
+                }
+                Err(e) => tried.push(format!("user root: session ok but list failed: {e}")),
+            },
+            Err(e) => tried.push(format!("user root: {e}")),
+        }
+    } else {
+        tried.push("no identifier for this container".into());
     }
-    let domain = Domain::from_name(scope)?;
-    let mut session = Session::open(tunnel, domain, identifier, logger).await?;
-    let names = session.list(".").await?;
-    Ok(format!(
-        "fileservice: granted ({} entries in the container root)",
-        names.len()
+
+    // Control: does the service open sessions at all?
+    match Session::open_as(tunnel, Domain::Temporary, "", "mobile", logger).await {
+        Ok(mut session) => match session.list(".").await {
+            Ok(names) => tried.push(format!(
+                "control (temporary domain): granted ({} entries) — the service works, iOS refuses this container's lookup",
+                names.len()
+            )),
+            Err(e) => tried.push(format!("control (temporary domain): session ok, list failed: {e}")),
+        },
+        Err(e) => tried.push(format!("control (temporary domain): {e}")),
+    }
+
+    Err(format!(
+        "device refused every FileService variant — {}",
+        tried.join(" | ")
     ))
 }
 
@@ -726,7 +877,7 @@ pub(crate) async fn probe_service(
 
 pub unsafe fn list_directory(
     pairing_path: *const c_char,
-    scope: *const c_char,
+    container_path: *const c_char,
     identifier: *const c_char,
     directory: *const c_char,
     log_cb: exploit::ALLogCallback,
@@ -735,10 +886,17 @@ pub unsafe fn list_directory(
     out_error: *mut *mut c_char,
 ) -> i32 {
     let pairing_path = opt_str(pairing_path, "airlift_pairing.plist");
-    let scope = opt_str(scope, "application");
+    let container_path = opt_str(container_path, "");
     let identifier = opt_str(identifier, "");
     let directory = opt_str(directory, ".");
     let ctx_usize = ctx as usize;
+
+    if !crate::fsengine::allowed_container(&container_path) {
+        if !out_error.is_null() {
+            *out_error = cstr("container_path is not allowed");
+        }
+        return 1;
+    }
 
     if identifier.is_empty() {
         if !out_error.is_null() {
@@ -754,7 +912,7 @@ pub unsafe fn list_directory(
         };
         idevice_ffi::run_sync_local(list_async(
             pairing_path.clone(),
-            scope.clone(),
+            container_path.clone(),
             identifier.clone(),
             directory.clone(),
             &logger,
@@ -785,7 +943,7 @@ pub unsafe fn list_directory(
 
 async fn list_async(
     pairing_path: String,
-    scope: String,
+    container_path: String,
     identifier: String,
     directory: String,
     logger: &Logger,
@@ -793,7 +951,14 @@ async fn list_async(
     let pairing_bytes = std::fs::read(&pairing_path)
         .map_err(|e| format!("Failed to read pairing file at {pairing_path}: {e}"))?;
     let mut tunnel = exploit::connect_tunnel(&pairing_bytes, logger).await?;
-    let entries = list_entries(&mut tunnel, &scope, &identifier, &directory, logger).await?;
+    let entries = list_entries(
+        &mut tunnel,
+        &container_path,
+        &identifier,
+        &directory,
+        logger,
+    )
+    .await?;
     serde_json::to_string_pretty(&json!({ "directory": directory, "entries": entries }))
         .map_err(|e| e.to_string())
 }

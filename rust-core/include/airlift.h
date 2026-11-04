@@ -170,7 +170,7 @@ void al_clear_target_hosts(void);
 
 // List a container through the Core Device FileService (iOS 26+).
 int32_t al_file_service_list(const char *pairing_path,
-                             const char *scope,
+                             const char *container_path,
                              const char *identifier,
                              const char *directory,
                              ALLogCallback log_cb,

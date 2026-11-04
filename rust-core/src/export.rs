@@ -426,24 +426,21 @@ async fn export_async(
     // CoreDevice FileService: export without a bridge and without moving
     // anything inside the container.
     if !bundle_id.is_empty() {
-        let scope = fsengine::fs_scope(&container_path);
         let mut fs_session = None;
         if let Ok(pairing_bytes) = fsengine::read_pairing(&pairing_path) {
             if let Ok(mut fs_tunnel) = exploit::connect_tunnel(&pairing_bytes, logger).await {
-                match file_service::Domain::from_name(scope) {
-                    Ok(domain) => {
-                        match file_service::Session::open(
-                            &mut fs_tunnel,
-                            domain,
-                            &bundle_id,
-                            logger,
-                        )
-                        .await
-                        {
-                            Ok(session) => fs_session = Some(session),
-                            Err(e) => logger.log(format!("file_service export unavailable: {e}")),
-                        }
-                    }
+                let domain = file_service::Domain::for_container(&container_path);
+                match file_service::Session::open_for_container(
+                    &mut fs_tunnel,
+                    domain,
+                    &bundle_id,
+                    &container_path,
+                    true,
+                    logger,
+                )
+                .await
+                {
+                    Ok((session, _)) => fs_session = Some(session),
                     Err(e) => logger.log(format!("file_service export unavailable: {e}")),
                 }
             }
