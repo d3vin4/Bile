@@ -5,6 +5,10 @@ struct CreditsView: View {
     @EnvironmentObject var lang: LanguageManager
     @Environment(\.dismiss) private var dismiss
 
+    @State private var currentIcon: String? = UIApplication.shared.alternateIconName
+    @State private var switchingIcon = false
+    @State private var iconError: String? = nil
+
     private let githubUser = "d3vin4"
     private var profileURL: URL { URL(string: "https://github.com/\(githubUser)")! }
     private var avatarURL: URL { URL(string: "https://github.com/\(githubUser).png")! }
@@ -37,6 +41,39 @@ struct CreditsView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 34)
+
+                    // App icon switcher
+                    VStack(spacing: 10) {
+                        Text(lang("credits.icon"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(spacing: 12) {
+                            iconOption(alternateName: nil, title: lang("icon.default"))
+                            iconOption(alternateName: "AltBlue", title: lang("icon.blue"))
+                        }
+                        if switchingIcon {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                Text(lang("icon.changing"))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if let iconError {
+                            Text(iconError)
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                    )
+                    .padding(.horizontal, 20)
 
                     // Author card: avatar beside the handle.
                     HStack(spacing: 14) {
@@ -100,6 +137,84 @@ struct CreditsView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+
+    // MARK: - Icon switcher
+
+    private func iconOption(alternateName: String?, title: String) -> some View {
+        let active = currentIcon == alternateName
+        return Button {
+            switchIcon(to: alternateName)
+        } label: {
+            VStack(spacing: 6) {
+                iconPreview(for: alternateName)
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .overlay(alignment: .topTrailing) {
+                        if active {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.body)
+                                .foregroundStyle(.blue, .white)
+                                .offset(x: 6, y: -6)
+                        }
+                    }
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(active ? Color.primary : Color.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(active ? Color.blue.opacity(0.12) : Color(uiColor: .tertiarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(active ? Color.blue.opacity(0.5) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(switchingIcon || active)
+    }
+
+    @ViewBuilder
+    private func iconPreview(for alternateName: String?) -> some View {
+        if alternateName == nil, let icon = appIcon {
+            Image(uiImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fill)
+        } else if let name = alternateName,
+                  let url = Bundle.main.url(forResource: name + "@3x", withExtension: "png"),
+                  let image = UIImage(contentsOfFile: url.path) {
+            Image(uiImage: image)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fill)
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(Color.gray.opacity(0.3))
+                Image(systemName: "photo")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func switchIcon(to alternateName: String?) {
+        guard alternateName != currentIcon, !switchingIcon else { return }
+        switchingIcon = true
+        iconError = nil
+        UIApplication.shared.setAlternateIconName(alternateName) { error in
+            DispatchQueue.main.async {
+                switchingIcon = false
+                if let error {
+                    iconError = error.localizedDescription
+                } else {
+                    currentIcon = alternateName
+                }
+            }
+        }
     }
 
     private var versionLine: String {
