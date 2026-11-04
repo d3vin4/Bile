@@ -20,61 +20,24 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>LSApplicationQueriesSchemes</key>
-	<array>
-		<string>localdevvpn</string>
-		<string>stosvpn</string>
-		<string>prefs</string>
-		<string>app-prefs</string>
-	</array>
-
-	<!-- Pairing host + loopback tunnel need Local Network permission. -->
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_remotepairing-pairable-host._tcp</string>
-		<string>_readipaprobe._tcp</string>
-	</array>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Readipa advertises an on-device pairing service so this iPhone can pair with itself, and connects to the local lockdownd daemon to reach app containers and App Groups.</string>
-
-	<!-- The 6-digit pairing PIN is shown as a Live Activity. -->
-	<key>NSSupportsLiveActivities</key>
-	<true/>
-
-	<!-- Audio keeps the app alive while the pairing PIN is approved in Settings. -->
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-	</array>
-
-	<key>UILaunchScreen</key>
-	<dict/>
-	<key>UIFileSharingEnabled</key>
-	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-
-	<!-- Let the user drop a pairing plist into the app from Files. -->
-	<key>CFBundleDocumentTypes</key>
+	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
-		<dict>
-			<key>CFBundleTypeName</key>
-			<string>Pairing File</string>
-			<key>CFBundleTypeRole</key>
-			<string>Viewer</string>
-			<key>LSHandlerRank</key>
-			<string>Alternate</string>
-			<key>LSItemContentTypes</key>
-			<array>
-				<string>com.apple.property-list</string>
-			</array>
-		</dict>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

@@ -21,7 +21,7 @@ struct LogView: View {
             }
             .listStyle(.plain)
             .searchable(text: $filter, prompt: lang("filter.logs"))
-            .navigationTitle("\(lang("logs")) (\(state.log.count))")
+            .navigationTitle("\(lang("tab.logs")) (\(state.log.count))")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -35,13 +35,13 @@ struct LogView: View {
                 }
             }
         }
+        .navigationViewStyle(.stack)
     }
 
     private func color(for line: String) -> Color {
         if line.contains("✅") { return .green }
         if line.contains("❌") { return .red }
         if line.lowercased().contains("failed") || line.lowercased().contains("error") { return .orange }
-        if line.hasPrefix("export: ") { return .secondary }
         return .primary
     }
 }

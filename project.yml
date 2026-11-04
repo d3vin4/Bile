@@ -9,11 +9,9 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.1.0"
-    CURRENT_PROJECT_VERSION: "2"
-    TARGETED_DEVICE_FAMILY: "1"
-    # AirliftFFI is arm64-only (aws-lc-rs / idevice); drop x86_64 simulator slice.
-    EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+    MARKETING_VERSION: "2.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""
     # Liquid Glass: the iOS 26 SDK opts in by default. Stated explicitly so the
@@ -27,44 +25,21 @@ targets:
     platform: iOS
     sources:
       - path: ios-app
-    dependencies:
-      - framework: AirliftFFI.xcframework
-        embed: false
-      - target: PairingLiveActivityExtension
-        embed: true
     settings:
       base:
         PRODUCT_NAME: "Readipa"
         PRODUCT_BUNDLE_IDENTIFIER: com.d3vin4.readipa
         INFOPLIST_FILE: ios-app/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        # idevice's static lib pulls in C++ symbols (aws-lc); link libc++.
-        OTHER_LDFLAGS: "-lc++"
+        # zlib for ZIP (de)compression inside the file manager.
+        OTHER_LDFLAGS: "-lz"
         GENERATE_INFOPLIST_FILE: NO
         UIDesignRequiresCompatibility: NO
-
-  PairingLiveActivityExtension:
-    type: app-extension
-    platform: iOS
-    sources:
-      - path: PairingLiveActivity
-      - path: ios-app/PairingActivityAttributes.swift
-    settings:
-      base:
-        PRODUCT_NAME: "PairingLiveActivity"
-        PRODUCT_BUNDLE_IDENTIFIER: com.d3vin4.readipa.pairingliveactivity
-        INFOPLIST_FILE: PairingLiveActivity/Info.plist
-        GENERATE_INFOPLIST_FILE: NO
-        SKIP_INSTALL: YES
-        # Must match the app or the extension is rejected at install time.
-        MARKETING_VERSION: "1.1.0"
-        CURRENT_PROJECT_VERSION: "2"
 
 schemes:
   Readipa:
     build:
       targets:
         Readipa: all
-        PairingLiveActivityExtension: all
     test:
       targets: []
