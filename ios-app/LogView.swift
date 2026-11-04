@@ -4,6 +4,7 @@ struct LogView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
     @State private var filter = ""
+    @State private var showCredits = false
 
     private var lines: [String] {
         let query = filter.lowercased()
@@ -31,8 +32,16 @@ struct LogView: View {
                         Image(systemName: "square.and.arrow.up")
                     }
                     .disabled(state.log.isEmpty)
+                    Button {
+                        showCredits = true
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                    }
                     Button(lang("clear")) { state.log.removeAll() }
                 }
+            }
+            .sheet(isPresented: $showCredits) {
+                CreditsView()
             }
         }
         .navigationViewStyle(.stack)

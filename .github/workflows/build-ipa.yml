@@ -28,20 +28,25 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Read version
+        id: ver
+        run: echo "version=$(grep 'MARKETING_VERSION' project.yml | head -1 | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+
       - name: Build IPA
         run: ./build-ipa.sh Release
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Readipa-ipa
-          path: build/Readipa.ipa
+          name: Bile-ipa
+          path: build/Bile.ipa
 
       - name: Create Release
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          files: build/Readipa.ipa
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: Bile v${{ steps.ver.outputs.version }}
+          files: build/Bile.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

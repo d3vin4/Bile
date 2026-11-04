@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct ReadipaApp: App {
+struct BileApp: App {
     @StateObject private var state = AppState.shared
     @StateObject private var lang = LanguageManager.shared
 

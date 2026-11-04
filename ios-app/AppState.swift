@@ -13,7 +13,7 @@ final class AppState: ObservableObject {
     @Published var showShareSheet: Bool = false
 
     init() {
-        logLine("Readipa ready")
+        logLine("Bile ready")
     }
 
     func logLine(_ s: String) {
@@ -41,7 +41,7 @@ final class AppState: ObservableObject {
     func shareLogs() {
         let text = log.joined(separator: "\n")
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("readipa-log-\(Int(Date().timeIntervalSince1970)).txt")
+            .appendingPathComponent("bile-log-\(Int(Date().timeIntervalSince1970)).txt")
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
             share(url: url)

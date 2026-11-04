@@ -7,12 +7,6 @@ __pycache__/
 *.xcodeproj/
 *.xcworkspace/
 
-# Rust build artifacts
-rust-core/target/
-
-# XCFramework (rebuilt by build-ios.sh)
-AirliftFFI.xcframework/
-
 # Package outputs
 *.ipa
 DerivedData/

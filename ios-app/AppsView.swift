@@ -134,7 +134,7 @@ struct AppRow: View {
             }
         }
         .padding(.vertical, 2)
-        .alert("Readipa", isPresented: $showDenied) {
+        .alert("Bile", isPresented: $showDenied) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(lang("container.locked"))
@@ -143,7 +143,7 @@ struct AppRow: View {
 }
 
 extension Notification.Name {
-    static let openPathInFiles = Notification.Name("readipa.openPathInFiles")
+    static let openPathInFiles = Notification.Name("bile.openPathInFiles")
 }
 
 // MARK: - Icon

@@ -1,4 +1,4 @@
-name: Readipa
+name: Bile
 options:
   bundleIdPrefix: com.d3vin4
   deploymentTarget:
@@ -9,7 +9,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "2.0.0"
+    MARKETING_VERSION: "0.0.1"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
@@ -20,15 +20,15 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: NO
 
 targets:
-  Readipa:
+  Bile:
     type: application
     platform: iOS
     sources:
       - path: ios-app
     settings:
       base:
-        PRODUCT_NAME: "Readipa"
-        PRODUCT_BUNDLE_IDENTIFIER: com.d3vin4.readipa
+        PRODUCT_NAME: "Bile"
+        PRODUCT_BUNDLE_IDENTIFIER: com.d3vin4.bile
         INFOPLIST_FILE: ios-app/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # zlib for ZIP (de)compression inside the file manager.
@@ -37,9 +37,9 @@ targets:
         UIDesignRequiresCompatibility: NO
 
 schemes:
-  Readipa:
+  Bile:
     build:
       targets:
-        Readipa: all
+        Bile: all
     test:
       targets: []

@@ -103,8 +103,8 @@ final class LanguageManager: ObservableObject {
         // Apps tab
         "apps": [.english: "Apps", .vietnamese: "Ứng dụng"],
         "search.apps": [.english: "Search apps or bundle id", .vietnamese: "Tìm app hoặc bundle id"],
-        "apps.unavailable": [.english: "iOS did not let Readipa enumerate installed apps. Pull to retry — this needs no escape, LaunchServices sometimes refuses right after install.",
-                              .vietnamese: "iOS không cho Readipa liệt kê app. Kéo để thử lại — việc này không cần escape, LaunchServices đôi khi từ chối ngay sau khi cài."],
+        "apps.unavailable": [.english: "iOS did not let Bile enumerate installed apps. Pull to retry — this needs no escape, LaunchServices sometimes refuses right after install.",
+                              .vietnamese: "iOS không cho Bile liệt kê app. Kéo để thử lại — việc này không cần escape, LaunchServices đôi khi từ chối ngay sau khi cài."],
         "container.locked": [.english: "iOS denies access to this container right now. It will open once a sandbox escape ships.",
                               .vietnamese: "iOS đang chặn truy cập container này. Sẽ mở được khi có sandbox escape."],
         "app.groups": [.english: "App Groups", .vietnamese: "App Group"],
@@ -118,5 +118,6 @@ final class LanguageManager: ObservableObject {
         "no.container": [.english: "This app has no data container", .vietnamese: "App này không có data container"],
         "loading": [.english: "Loading…", .vietnamese: "Đang tải…"],
         "language": [.english: "Language", .vietnamese: "Ngôn ngữ"],
+        "credits": [.english: "Credits", .vietnamese: "Giới thiệu"],
     ]
 }

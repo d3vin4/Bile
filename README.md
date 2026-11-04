@@ -1,93 +1,75 @@
-# Readipa
+# Bile
 
-Native iOS file manager scoped strictly to **Application Containers**
-(`/var/mobile/Containers/Data/Application`) and **App Groups**
-(`/var/mobile/Containers/Shared/AppGroup`).
+A Filza-style file manager for iOS — plain, honest, and escape-free.
 
-Built on [`airlift`](https://github.com/0xjohnnydev/airlift) (AirTraffic
-sandbox-escape primitives) and
-[`AirCard-iOS`](https://github.com/Mak5er/AirCard-iOS) (RPPairing host +
-loopback tunnel + FFI bridge).
+Bile browses your iPhone's filesystem directly from `/`, lists every installed
+app through LaunchServices, and keeps a clean activity log. It contains **no
+sandbox escape and no exploit code**: whatever iOS refuses to open, Bile
+labels "Permission denied" instead of pretending. When a real sandbox escape
+ships, it slots into one small layer (`LocalFS`) and every path above lights up.
 
-Built with **Xcode 26 / iOS 26 SDK** and adopts **Liquid Glass**; it still runs
-on iOS 18+ (glass is availability-gated).
+## Download
 
-## Features
+Grab the latest unsigned IPA from
+[Releases](https://github.com/d3vin4/Readipa/releases) and install it with
+your preferred sideloading tool (TrollStore, AltStore, Sideloadly, …).
 
-- **Self-pairing** with an on-device RPPairing host. The 6-digit PIN is shown in
-  the app *and* as a **Live Activity** (Lock Screen + Dynamic Island).
-- **Pairing survives relaunch and reinstall**: credentials live in Documents and
-  are mirrored into the **Keychain**, restored automatically on launch.
-- **Tunnel diagnostics**: `Test tunnel` dials RSD `49152` and lockdownd `62078`
-  on every candidate address, so you know whether the loopback VPN really works.
-- **Catalog**: every installed app with its Data container and App Groups.
-- **File manager**: browse, preview, filter, sort, import, rename/move, delete,
-  share a single file, and **export a whole container to a ZIP** → *Save to
-  Files*.
-- **Two access engines**:
-  - **HouseArrest** (dev-signed / sideloaded apps) — AFC rooted at the
-    container, fast and non-destructive.
-  - **AirLift bridge** (App Groups and everything else) — a symlink in
-    `/var/mobile/Media` pointing at the container.
-- **Recovery**: `Setup › Recovery` lists anything Readipa left in Media and can
-  move it back. Nothing is ever deleted automatically.
+## Tabs
 
-## Data-safety guarantees
+### Files
+- Browse anywhere on disk, starting at `/`
+- Breadcrumb bar — tap any segment to jump
+- Back / forward / up with full history
+- Go-to-path sheet with recents
+- Favorites (bookmark any folder)
+- Hidden (dot) files toggle
+- Sort by name / size / date, ascending or descending
+- List and grid view
+- Pull to refresh
+- Filter in-folder + recursive search
+- Multi-select with batch share / copy / cut / compress / delete
+- New folder, new file, new symlink
+- Rename, duplicate
+- Copy / cut / paste with conflict-safe naming
+- Recursive delete with confirmation (symlinks are never followed)
+- Info sheet: size, dates, owner, **chmod editor**, symlink target
+- Calculate folder size (recursive, off the main thread)
+- Text editor with save
+- QuickLook preview for anything iOS can render
+- **Compress to ZIP** and **Extract ZIP** (STORE + DEFLATE via Apple's
+  Compression framework, symlink- and traversal-safe extraction)
 
-| Guarantee | How |
-|---|---|
-| Nothing in Media is deleted unless this app created it in the same operation | staging names are namespaced and tracked per call |
-| Symlinks are never followed by recursive deletes | `remove_tree_safe` walks post-order and removes links as single entries |
-| Reads never relocate data when the container allows direct reads | `probe_bridge` tests listing and reading **separately** (`bridge_readonly`) |
-| Every AirTraffic move is verified | poll for *destination present* / *source gone*; failure restores the original |
-| The Books sync state is never destroyed | `Books/Sync/Books.plist` is snapshotted and restored around every move |
-| A folder is never replaced by a file | the moved-aside entry is inspected first and put straight back |
-| Renames never overwrite | an existing destination is refused instead of deleted |
-| Risky directory relocation is opt-in | `Setup › AirLift move mode`, default **off** |
-| Paths cannot escape the scope | strict Rust validation (root boundary, no `..`/`.`) |
-| Big files cannot OOM mid-operation | chunked 256–512 KB streaming everywhere |
+### Apps
+- Every installed app through LaunchServices (bundle id, version, type)
+- Real icons read from each bundle
+- Data-container paths shown; containers open into Files when iOS allows it
+  and are clearly marked locked when it does not
 
-## Layout
-
-```
-ios-app/            SwiftUI app (Liquid Glass, Live Activity owner, Keychain)
-PairingLiveActivity/  WidgetKit extension that renders the PIN
-rust-core/          Rust FFI: containers.rs, fsengine.rs, export.rs, exploit.rs
-  vendor/idevice    pinned idevice + idevice-ffi
-.github/workflows/  macos-26 → Rust → xcodegen → unsigned IPA → Release
-```
+### Logs
+- Timestamped activity log with a bounded buffer
+- Filter, share, clear
+- **Credits** — the author's GitHub profile and avatar
 
 ## Build
 
-```sh
-./build-ios.sh        # rust-core → AirliftFFI.xcframework
+The IPA is built automatically on every push to `main`
+(GitHub Actions, macOS 26 / Xcode 26, XcodeGen for project generation).
+To build locally:
+
+```bash
+brew install xcodegen
 xcodegen generate
-./build-ipa.sh        # unsigned Readipa.ipa
+./build-ipa.sh Release
+# → build/Bile.ipa
 ```
 
-CI does the same on `macos-26` (Xcode 26.6 / iOS 26 SDK) and publishes the IPA
-as a release asset.
+## Credits
 
-## Requirements
-
-- A loopback VPN providing the RSD tunnel at `10.7.0.1:49152`
-  (LocalDevVPN, StosVPN, SideStore WireGuard) — use **Test tunnel** to confirm.
-- iOS 27.0 (AirLift's proven build) for the AirLift engine; HouseArrest works on
-  broader versions.
-- Live Activities enabled in Settings › Readipa for the Lock-Screen PIN.
-
-## Notes
-
-- The IPA is **unsigned**; sign it yourself or install with
-  TrollStore / SideStore / AltStore. If you re-sign, the provisioning profile
-  must cover **both** `com.d3vin4.readipa` and
-  `com.d3vin4.readipa.pairingliveactivity` or the Live Activity extension is
-  dropped.
-- In AirLift move mode a folder is relocated for the duration of an operation.
-  It is always moved back and verified; if that ever fails, the app names the
-  exact recovery path.
+Made by [**@d3vin4**](https://github.com/d3vin4)
+<img src="https://github.com/d3vin4.png" width="24" alt="d3vin4" style="border-radius: 12px" />
+— find the project and every release on
+[GitHub](https://github.com/d3vin4/Readipa).
 
 ## License
 
-MIT. Includes code derived from `airlift` (© 2026 Johnny Franks) and
-`AirCard-iOS` (© 2026 Maksym Reva), both MIT.
+MIT — see [LICENSE](LICENSE).
