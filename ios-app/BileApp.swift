@@ -11,6 +11,7 @@ struct BileApp: App {
                 .environmentObject(state)
                 .environmentObject(lang)
                 .tint(.blue)
+                .preferredColorScheme(.dark)
         }
     }
 }

@@ -1,66 +1,29 @@
 import SwiftUI
 
-// Liquid Glass (iOS 26) with a functional fallback for earlier releases.
-// Every effect is applied *after* layout/appearance modifiers, and grouping is
-// left to GlassEffectContainer at the call site so shapes blend correctly.
+// Bile uses the native iOS Liquid Glass surfaces as-is (system toolbars,
+// tab bar, menus). This file only carries the shared dark-gray palette and
+// the canvas helper that keeps every screen on the same background.
 
-extension View {
-    /// Glass card background for a content grouping.
-    @ViewBuilder
-    func readipaGlassCard(cornerRadius: CGFloat = 16) -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-        } else {
-            self.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
-        }
-    }
+// MARK: - Bile dark gray surfaces (Facebook Dark Mode palette)
 
-    /// Capsule glass, for compact status chips.
-    @ViewBuilder
-    func readipaGlassCapsule() -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: .capsule)
-        } else {
-            self.background(.ultraThinMaterial, in: Capsule())
-        }
-    }
-
-    /// Standard / prominent glass button style.
-    @ViewBuilder
-    func readipaGlassButton(prominent: Bool = false) -> some View {
-        if #available(iOS 26.0, *) {
-            if prominent {
-                self.buttonStyle(.glassProminent)
-            } else {
-                self.buttonStyle(.glass)
-            }
-        } else {
-            if prominent {
-                self.buttonStyle(.borderedProminent)
-            } else {
-                self.buttonStyle(.bordered)
-            }
-        }
-    }
+extension Color {
+    /// Main canvas — #18191A, never pure black.
+    static let bileBackground = Color(red: 0.0941, green: 0.0980, blue: 0.1020)
+    /// Bars, cards and secondary surfaces — #242526.
+    static let bileSurface = Color(red: 0.1412, green: 0.1451, blue: 0.1490)
+    /// Pressed / elevated states — #3A3B3C.
+    static let bileElevated = Color(red: 0.2275, green: 0.2314, blue: 0.2353)
+    /// Subtle separators — #3E4042 at low opacity.
+    static let bileSeparator = Color(red: 0.2431, green: 0.2510, blue: 0.2588).opacity(0.55)
 }
 
-/// Small labelled status chip used across Setup / Files.
-struct StatusChip: View {
-    let title: String
-    let value: String
-    let ok: Bool
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(ok ? Color.green : Color.orange)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.caption2).foregroundStyle(.secondary)
-                Text(value).font(.caption).bold()
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .readipaGlassCapsule()
+extension View {
+    /// Shared canvas: hides the system list/editor background (pure black in
+    /// dark mode) and lays the Facebook-style dark gray underneath, safe areas
+    /// included.
+    func bileCanvas() -> some View {
+        self
+            .scrollContentBackground(.hidden)
+            .background(Color.bileBackground.ignoresSafeArea())
     }
 }

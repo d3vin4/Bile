@@ -19,6 +19,7 @@ struct FilesView: View {
                 content
                 footer
             }
+            .background(Color.bileBackground.ignoresSafeArea())
 
             .navigationTitle(model.title)
             .navigationBarTitleDisplayMode(.inline)
@@ -90,7 +91,10 @@ struct FilesView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
             }
-            .background(.ultraThinMaterial)
+            .background(Color.bileSurface)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Color.bileSeparator).frame(height: 0.5)
+            }
         }
     }
 
@@ -138,6 +142,7 @@ struct FilesView: View {
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .refreshable { model.reload() }
         .overlay { emptyOrError }
     }
@@ -211,6 +216,7 @@ struct FilesView: View {
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder
@@ -254,7 +260,10 @@ struct FilesView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(.ultraThinMaterial)
+        .background(Color.bileSurface)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.bileSeparator).frame(height: 0.5)
+        }
     }
 
     private var statusBar: some View {

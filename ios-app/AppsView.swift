@@ -22,9 +22,11 @@ struct AppsView: View {
                             .contextMenu { appMenu(app) }
                     }
                     .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                     .refreshable { catalog.reload(state: state) }
                 }
             }
+            .background(Color.bileBackground.ignoresSafeArea())
             .searchable(text: $catalog.query, prompt: lang("search.apps"))
             .navigationTitle(lang("tab.apps"))
             .toolbar {

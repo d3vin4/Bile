@@ -47,6 +47,7 @@ struct GoToSheet: View {
                     }
                 }
             }
+            .bileCanvas()
             .navigationTitle(lang("go.to.path"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -149,6 +150,7 @@ struct FileInfoView: View {
                     }
                 }
             }
+            .bileCanvas()
             .navigationTitle(lang("info"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -226,6 +228,8 @@ struct TextEditorView: View {
                     ZStack(alignment: .bottomTrailing) {
                         TextEditor(text: $text)
                             .font(.system(.callout, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .background(Color.bileBackground)
                             .padding(6)
                         if text != original {
                             Text("edited")
@@ -238,7 +242,8 @@ struct TextEditorView: View {
                     }
                 }
             }
-            .navigationTitle((path as NSString).lastPathComponent)
+                        .background(Color.bileBackground.ignoresSafeArea())
+.navigationTitle((path as NSString).lastPathComponent)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

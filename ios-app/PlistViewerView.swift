@@ -45,10 +45,13 @@ struct PlistViewerView: View {
 
                     }
                     .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.bileBackground.ignoresSafeArea())
                     .searchable(text: $searchText, prompt: lang("plist.search"))
                 }
             }
-            .navigationTitle((path as NSString).lastPathComponent)
+                        .background(Color.bileBackground.ignoresSafeArea())
+.navigationTitle((path as NSString).lastPathComponent)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

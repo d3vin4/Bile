@@ -21,6 +21,8 @@ struct LogView: View {
                     .textSelection(.enabled)
             }
             .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.bileBackground.ignoresSafeArea())
             .searchable(text: $filter, prompt: lang("filter.logs"))
             .navigationTitle("\(lang("tab.logs")) (\(state.log.count))")
             .navigationBarTitleDisplayMode(.inline)

@@ -40,6 +40,7 @@ struct CreditsView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
+                    .listRowBackground(Color.bileSurface)
                 }
 
                 // Author.
@@ -68,15 +69,19 @@ struct CreditsView: View {
                         Spacer(minLength: 0)
                     }
                     .padding(.vertical, 2)
+                    .listRowBackground(Color.bileSurface)
 
                     Link(destination: profileURL) {
                         Label(lang("credits.profile"), systemImage: "person.crop.circle")
                     }
+                    .listRowBackground(Color.bileSurface)
                     Link(destination: repoURL) {
                         Label(lang("credits.repo"), systemImage: "shippingbox")
                     }
+                    .listRowBackground(Color.bileSurface)
                 }
             }
+            .bileCanvas()
             .navigationTitle(lang("credits"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -86,7 +91,6 @@ struct CreditsView: View {
             }
         }
         .navigationViewStyle(.stack)
-        .preferredColorScheme(.dark)
     }
 
     private var versionLine: String {
