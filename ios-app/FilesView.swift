@@ -45,7 +45,7 @@ struct FilesView: View {
                 Text(model.alertMessage)
             }
             .confirmDialog(
-                model.confirmTitle,
+                Text(model.confirmTitle),
                 isPresented: $model.showConfirm,
                 titleVisibility: .visible
             ) {
@@ -74,15 +74,15 @@ struct FilesView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
                     crumb("/", label: "/", id: "/", proxy: proxy)
-                    ForEach(Array(model.crumbs.enumerated()), id: \.offset) { _, crumb in
+                    ForEach(Array(model.crumbs.enumerated()), id: \.offset) { _, segment in
                         Image(systemName: "chevron.right")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
-                        crumb(crumb.path,
-                              label: crumb.name,
-                              id: crumb.path,
+                        crumb(segment.path,
+                              label: segment.name,
+                              id: segment.path,
                               proxy: proxy,
-                              current: crumb.path == model.path)
+                              current: segment.path == model.path)
                     }
                 }
                 .padding(.horizontal, 10)

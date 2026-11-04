@@ -111,8 +111,8 @@ enum ZipArchive {
 
             // Unix mode lives in the high 16 bits of the external attributes.
             let unixMode = Int((extAttrs >> 16) & 0xFFFF)
-            let isDir = name.hasSuffix("/") || (unixMode & S_IFMT) == S_IFDIR
-            let isSymlink = (unixMode & S_IFMT) == S_IFLNK
+            let isDir = name.hasSuffix("/") || (unixMode & Int(S_IFMT)) == Int(S_IFDIR)
+            let isSymlink = (unixMode & Int(S_IFMT)) == Int(S_IFLNK)
 
             var linkTarget: String? = nil
             if isSymlink {

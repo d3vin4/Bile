@@ -168,7 +168,7 @@ final class FilesModel: ObservableObject {
         }
     }
 
-    static func permissionMessage(for path: String, error: Error) -> String {
+    nonisolated static func permissionMessage(for path: String, error: Error) -> String {
         let ns = error as NSError
         if ns.domain == NSCocoaErrorDomain && ns.code == 257 {
             return "Permission denied — iOS only opens this with a sandbox escape"

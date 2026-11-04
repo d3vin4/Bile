@@ -17,6 +17,10 @@ enum LocalFS {
         var linkTarget: String?
         var owner: String?
         var group: String?
+
+        var permissionsString: String {
+            String(format: "%o", permissions)
+        }
     }
 
     static func attrs(at path: String) -> Attrs? {
