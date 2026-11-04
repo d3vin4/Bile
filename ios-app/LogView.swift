@@ -19,6 +19,7 @@ struct LogView: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(color(for: line))
                     .textSelection(.enabled)
+                    .listRowBackground(BileTheme.rowBackground)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)

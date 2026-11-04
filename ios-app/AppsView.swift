@@ -19,6 +19,7 @@ struct AppsView: View {
                 } else {
                     List(catalog.apps) { app in
                         AppRow(app: app)
+                            .listRowBackground(BileTheme.rowBackground)
                             .contextMenu { appMenu(app) }
                     }
                     .listStyle(.plain)
@@ -55,7 +56,7 @@ struct AppsView: View {
                     .foregroundStyle(.secondary)
                 Text(catalog.loadError ?? lang("apps.unavailable"))
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BileTheme.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
             }
@@ -107,7 +108,7 @@ struct AppRow: View {
                         Text("system")
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1)
-                            .background(Color.secondary.opacity(0.15), in: Capsule())
+                            .background(BileTheme.elevated, in: Capsule())
                     }
                     if !app.dataContainer.isEmpty {
                         Label(app.isReadable ? "readable" : "locked",

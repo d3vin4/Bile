@@ -20,7 +20,9 @@ struct GoToSheet: View {
                         .autocorrectionDisabled()
                         .font(.callout.monospaced())
                         .onSubmit { submit() }
+                        .listRowBackground(BileTheme.background)
                     Button(lang("go")) { submit() }
+                        .listRowBackground(BileTheme.background)
                 }
                 if !model.favorites.isEmpty {
                     Section(lang("favorites")) {
@@ -31,6 +33,7 @@ struct GoToSheet: View {
                             } label: {
                                 Text(fav).font(.callout.monospaced())
                             }
+                            .listRowBackground(BileTheme.background)
                         }
                     }
                 }
@@ -43,6 +46,7 @@ struct GoToSheet: View {
                             } label: {
                                 Text(recent).font(.callout.monospaced())
                             }
+                            .listRowBackground(BileTheme.background)
                         }
                     }
                 }
@@ -100,8 +104,10 @@ struct FileInfoView: View {
                                     .textSelection(.enabled)
                             }
                         }
+                        .listRowBackground(BileTheme.cardRowBackground)
                     }
                     Section(lang("info")) {
+                        // themed rows
                         row(lang("type"), a.isDir ? lang("folder") : (a.isLink ? "symlink" : "file"))
                         if !a.isDir {
                             row(lang("size"), FileEntry.prettySize(a.size))
@@ -122,20 +128,23 @@ struct FileInfoView: View {
                             HStack {
                                 if calculating {
                                     ProgressView()
-                                    Text(lang("calculating")).foregroundStyle(.secondary)
+                                    Text(lang("calculating")).foregroundStyle(BileTheme.textSecondary)
                                 } else if let size = folderSize {
                                     Text(FileEntry.prettySize(size)).bold()
                                 } else {
                                     Button(lang("calculate.size")) { calculate() }
                                 }
                             }
+                            .listRowBackground(BileTheme.cardRowBackground)
                         }
                     }
                     Section(lang("permissions")) {
                         TextField("644", text: $permText)
                             .font(.callout.monospaced())
                             .keyboardType(.numberPad)
+                            .listRowBackground(BileTheme.cardRowBackground)
                         Button(lang("apply")) { applyPermissions() }
+                            .listRowBackground(BileTheme.cardRowBackground)
                     }
                     Section {
                         Button {
@@ -143,10 +152,12 @@ struct FileInfoView: View {
                         } label: {
                             Label(lang("share"), systemImage: "square.and.arrow.up")
                         }
+                        .listRowBackground(BileTheme.cardRowBackground)
                     }
                 } else {
                     Section {
-                        Text("Cannot read this item").foregroundStyle(.secondary)
+                        Text("Cannot read this item").foregroundStyle(BileTheme.textSecondary)
+                            .listRowBackground(BileTheme.cardRowBackground)
                     }
                 }
             }
@@ -168,7 +179,7 @@ struct FileInfoView: View {
 
     private func row(_ key: String, _ value: String) -> some View {
         HStack {
-            Text(key).foregroundStyle(.secondary)
+            Text(key).foregroundStyle(BileTheme.textSecondary)
             Spacer()
             Text(value)
                 .font(.callout.monospaced())
@@ -177,6 +188,7 @@ struct FileInfoView: View {
                 .multilineTextAlignment(.trailing)
         }
         .font(.callout)
+        .listRowBackground(BileTheme.cardRowBackground)
     }
 
     private func calculate() {
@@ -336,7 +348,7 @@ struct ContentUnavailableCompat: View {
                 .foregroundStyle(.secondary)
             Text(title)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BileTheme.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 30)
         }

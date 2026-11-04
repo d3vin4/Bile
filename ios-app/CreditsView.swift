@@ -52,7 +52,7 @@ struct CreditsView: View {
                                     .interpolation(.high)
                                     .aspectRatio(contentMode: .fill)
                             } else {
-                                Circle().fill(Color.blue.opacity(0.25))
+                                Circle().fill(BileTheme.tint.opacity(0.25))
                                     .overlay { ProgressView() }
                             }
                         }

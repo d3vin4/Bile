@@ -107,7 +107,7 @@ struct FilesView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
-                current ? AnyShapeStyle(Color.accentColor.opacity(0.15)) : AnyShapeStyle(.clear),
+                current ? AnyShapeStyle(BileTheme.tint.opacity(0.15)) : AnyShapeStyle(.clear),
                 in: RoundedRectangle(cornerRadius: 5)
             )
             .contentShape(Rectangle())
@@ -136,6 +136,7 @@ struct FilesView: View {
             ForEach(model.displayed) { entry in
                 FileRow(entry: entry, selected: model.selection.contains(entry.path),
                         selecting: model.isSelecting)
+                    .listRowBackground(BileTheme.rowBackground)
                     .contentShape(Rectangle())
                     .onTapGesture { model.tap(entry) }
                     .contextMenu { entryMenu(entry) }
@@ -165,7 +166,7 @@ struct FilesView: View {
                     .frame(maxWidth: .infinity)
                     .background(
                         model.selection.contains(entry.path)
-                            ? AnyShapeStyle(Color.accentColor.opacity(0.18))
+                            ? AnyShapeStyle(BileTheme.tint.opacity(0.18))
                             : AnyShapeStyle(Color.clear),
                         in: RoundedRectangle(cornerRadius: 10)
                     )
@@ -196,18 +197,19 @@ struct FilesView: View {
                                 .truncationMode(.middle)
                         }
                     }
+                    .listRowBackground(BileTheme.rowBackground)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         let entry = FileEntry(entryForPath: path)
                         model.tap(entry)
                     }
-                    .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10))
                 }
             } header: {
                 HStack {
                     Text("\(model.searchResults.count) matches")
+                        .foregroundStyle(BileTheme.textSecondary)
                     Spacer()
                     if model.isSearching { ProgressView() }
                     Button(lang("search.close")) { model.exitSearch() }
@@ -228,7 +230,7 @@ struct FilesView: View {
                     .foregroundStyle(.secondary)
                 Text(error)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BileTheme.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
             }
@@ -239,7 +241,7 @@ struct FilesView: View {
                     .font(.largeTitle)
                     .foregroundStyle(.secondary)
                 Text(lang("empty.folder"))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BileTheme.textSecondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.isLoading {
@@ -569,9 +571,9 @@ struct FileGlyph: View {
 
     /// One unified palette: folders carry the app tint, files stay neutral.
     static func tint(for entry: FileEntry?) -> Color {
-        guard let entry else { return .secondary }
-        if entry.isDir { return .blue }
-        if entry.isLink { return .purple }
-        return .secondary
+        guard let entry else { return BileTheme.textSecondary }
+        if entry.isDir { return BileTheme.tint }
+        if entry.isLink { return BileTheme.link }
+        return BileTheme.textSecondary
     }
 }

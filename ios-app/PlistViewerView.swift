@@ -42,6 +42,7 @@ struct PlistViewerView: View {
                             depth: 0,
                             maxChildren: maxChildren
                         )
+                        .listRowBackground(BileTheme.rowBackground)
 
                     }
                     .listStyle(.plain)
