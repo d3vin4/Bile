@@ -188,7 +188,7 @@ private struct NodeRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if let key, !key.isEmpty {
                 Text(key)
-                    .font(.callout.semibold())
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(.blue)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -223,7 +223,7 @@ private struct NodeRow: View {
             }
         case let n as NSNumber:
             // JSON booleans arrive as NSNumber — tell them apart via CFBoolean.
-            let text = CFGetTypeID(n) == CFBoolean.GetTypeID()
+            let text = CFGetTypeID(n) == CFBooleanGetTypeID()
                 ? (n.boolValue ? "true" : "false")
                 : n.stringValue
             Text(text)
