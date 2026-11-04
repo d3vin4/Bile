@@ -5,8 +5,8 @@ import QuickLook
 ///
 /// Everything here is plain `FileManager` work — the app contains no sandbox
 /// escape, so paths iOS refuses simply show "Permission denied" until a real
-/// escape ships. The tab runs on Bile's charcoal theme regardless of the
-/// system appearance.
+/// escape ships. The tab keeps the native system look with Liquid Glass
+/// surfaces and a single app-wide blue tint.
 struct FilesView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
