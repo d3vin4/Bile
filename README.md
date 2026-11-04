@@ -1,6 +1,6 @@
 # Bile
 
-A Filza-style file manager for iOS — plain, honest, and escape-free.
+A fast, escape-free file manager for iOS.
 
 Bile browses your iPhone's filesystem directly from `/`, lists every installed
 app through LaunchServices, and keeps a clean activity log. It contains **no
@@ -11,44 +11,45 @@ ships, it slots into one small layer (`LocalFS`) and every path above lights up.
 ## Download
 
 Grab the latest unsigned IPA from
-[Releases](https://github.com/d3vin4/Readipa/releases) and install it with
+[Releases](https://github.com/d3vin4/Bile/releases) and install it with
 your preferred sideloading tool (TrollStore, AltStore, Sideloadly, …).
 
 ## Tabs
 
 ### Files
-- Browse anywhere on disk, starting at `/`
-- Breadcrumb bar — tap any segment to jump
-- Back / forward / up with full history
-- Go-to-path sheet with recents
-- Favorites (bookmark any folder)
-- Hidden (dot) files toggle
-- Sort by name / size / date, ascending or descending
-- List and grid view
-- Pull to refresh
-- Filter in-folder + recursive search
-- Multi-select with batch share / copy / cut / compress / delete
-- New folder, new file, new symlink
-- Rename, duplicate
+
+A full browser rooted at `/` on a charcoal dark theme:
+
+- Breadcrumb bar — tap any segment to jump; back / forward / up with history
+- Go-to-path sheet with recents, favorites (bookmark any folder)
+- Hidden (dot) files toggle · six sort orders · list & grid view
+- Pull to refresh · in-folder filter · recursive search
+- Multi-select with a tool bar: share, copy, cut, compress, copy paths,
+  select all, delete
+- New folder, new file, new symlink · rename · duplicate
 - Copy / cut / paste with conflict-safe naming
 - Recursive delete with confirmation (symlinks are never followed)
-- Info sheet: size, dates, owner, **chmod editor**, symlink target
+- Info sheet: size, dates, owner, chmod editor, symlink target
 - Calculate folder size (recursive, off the main thread)
 - Text editor with save
+- **Plist viewer** — structured tree for XML/binary plists, JSON and
+  provisioning profiles, with search, expand/collapse, and edit-as-text
 - QuickLook preview for anything iOS can render
-- **Compress to ZIP** and **Extract ZIP** (STORE + DEFLATE via Apple's
-  Compression framework, symlink- and traversal-safe extraction)
+- Compress to ZIP and extract ZIP (STORE + DEFLATE via Apple's Compression
+  framework, symlink- and traversal-safe extraction)
 
 ### Apps
+
 - Every installed app through LaunchServices (bundle id, version, type)
 - Real icons read from each bundle
 - Data-container paths shown; containers open into Files when iOS allows it
   and are clearly marked locked when it does not
 
 ### Logs
+
 - Timestamped activity log with a bounded buffer
 - Filter, share, clear
-- **Credits** — the author's GitHub profile and avatar
+- **Credits** — app icon, version, and the author's GitHub profile & avatar
 
 ## Build
 
@@ -66,9 +67,9 @@ xcodegen generate
 ## Credits
 
 Made by [**@d3vin4**](https://github.com/d3vin4)
-<img src="https://github.com/d3vin4.png" width="24" alt="d3vin4" style="border-radius: 12px" />
-— find the project and every release on
-[GitHub](https://github.com/d3vin4/Readipa).
+<img src="https://github.com/d3vin4.png" width="24" alt="d3vin4" /> —
+project and releases live at
+[github.com/d3vin4/Bile](https://github.com/d3vin4/Bile).
 
 ## License
 

@@ -46,6 +46,8 @@ final class FilesModel: ObservableObject {
     @Published var editorPath: String? = nil
     @Published var showQuickLook = false
     @Published var quickLookPath: String? = nil
+    @Published var showPlistViewer = false
+    @Published var plistViewerPath: String? = nil
 
     // MARK: - Alerts & confirms
 
@@ -189,11 +191,34 @@ final class FilesModel: ObservableObject {
     func open(_ entry: FileEntry) {
         if entry.isDir {
             go(to: entry.path)
+        } else if isPlistLike(entry) {
+            showPlist(entry)
         } else if entry.isTextFile {
             edit(entry)
         } else {
             quickLook(entry)
         }
+    }
+
+    func isPlistLike(_ entry: FileEntry) -> Bool {
+        ["plist", "json", "mobileprovision", "entitlements"].contains(entry.ext)
+    }
+
+    func showPlist(_ entry: FileEntry) {
+        plistViewerPath = entry.path
+        showPlistViewer = true
+    }
+
+    func copyPath(_ entry: FileEntry) {
+        UIPasteboard.general.string = entry.path
+        note("Copied path: \(entry.path)")
+    }
+
+    func copyPathsSelection() {
+        let paths = selection.sorted()
+        guard !paths.isEmpty else { return }
+        UIPasteboard.general.string = paths.joined(separator: "\n")
+        note("Copied \(paths.count) path(s)")
     }
 
     func tap(_ entry: FileEntry) {
