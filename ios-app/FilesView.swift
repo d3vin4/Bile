@@ -541,7 +541,8 @@ struct FileRow: View {
     }
 }
 
-/// Icon glyph used by both list rows and grid cells.
+/// Stock SF Symbol glyph — nothing hand-drawn, tinted by type.
+
 struct FileGlyph: View {
     var entry: FileEntry?
     var path: String = ""
@@ -572,68 +573,45 @@ struct FileGlyph: View {
     }
 
     var body: some View {
-        let name = entry?.name ?? (path as NSString).lastPathComponent
-        let isDir = entry?.isDir ?? false
         let isLink = entry?.isLink ?? false
         let tint = Self.tint(for: entry)
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [tint.opacity(0.38), tint.opacity(0.16)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
-                        .stroke(tint.opacity(0.35), lineWidth: 0.5)
-                )
-            Image(systemName: entry?.icon ?? "doc")
-                .font(.system(size: size * 0.58, weight: .semibold))
-                .foregroundStyle(tint)
-        }
-        .frame(width: size * 1.18, height: size * 1.18)
-        .overlay(alignment: .bottomTrailing) {
-            if isLink {
-                Image(systemName: "link.circle.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.purple)
-                    .background(Circle().fill(Color.bileBG))
-                    .offset(x: 3, y: 3)
+        Image(systemName: entry?.icon ?? "doc")
+            .font(.system(size: size * 0.85, weight: .regular))
+            .foregroundStyle(tint)
+            .frame(width: size + 10, height: size + 10)
+            .background(Color.bileCard, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.bileLine, lineWidth: 0.5)
+            )
+            .overlay(alignment: .bottomTrailing) {
+                if isLink {
+                    Image(systemName: "link.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.purple)
+                        .background(Circle().fill(Color.bileBG))
+                        .offset(x: 3, y: 3)
+                }
             }
-        }
     }
 
-    /// Type colouring so the charcoal list still reads at a glance.
+    /// Type colouring: stock system colours, no custom palette.
     static func tint(for entry: FileEntry?) -> Color {
         guard let entry else { return .gray }
         if entry.isLink { return .purple }
         if entry.isDir { return .blue }
         switch entry.ext {
-        case "png", "jpg", "jpeg", "gif", "heic", "heif", "webp", "bmp", "tiff":
-            return .pink
-        case "mp4", "mov", "m4v", "avi", "mkv":
-            return .red
-        case "mp3", "m4a", "wav", "aac", "flac", "ogg":
-            return .orange
-        case "plist", "json", "xml", "yaml", "yml", "ini", "cfg", "conf":
-            return .teal
-        case "h", "m", "swift", "c", "cpp", "rs", "py", "js", "ts", "sh", "lua":
-            return .green
-        case "sqlite", "sqlite3", "db", "sqlite-wal", "sqlite-shm":
-            return .indigo
-        case "zip", "gz", "tar", "bz2", "xz", "ipa", "deb", "aar":
-            return .brown
-        case "pdf":
-            return .red
-        case "ttf", "otf":
-            return .mint
-        case "dylib", "framework", "bundle", "app", "appex":
-            return .cyan
-        case "txt", "md", "log", "rtf":
-            return .cyan
-        default:
-            return .gray
+        case "png", "jpg", "jpeg", "gif", "heic", "heif", "webp", "bmp", "tiff": return .red
+        case "mp4", "mov", "m4v", "avi", "mkv": return .red
+        case "mp3", "m4a", "wav", "aac", "flac", "ogg": return .orange
+        case "plist", "json", "xml", "yaml", "yml", "ini", "cfg", "conf": return .teal
+        case "h", "m", "swift", "c", "cpp", "rs", "py", "js", "ts", "sh", "lua": return .green
+        case "sqlite", "sqlite3", "db", "sqlite-wal", "sqlite-shm": return .indigo
+        case "zip", "gz", "tar", "bz2", "xz", "ipa", "deb", "aar": return .purple
+        case "pdf": return .pink
+        case "dylib", "framework", "bundle", "app", "appex": return .cyan
+        case "ttf", "otf": return .mint
+        default: return .gray
         }
     }
 }
