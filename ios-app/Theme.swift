@@ -4,7 +4,7 @@ import SwiftUI
 /// from here. Views must not hardcode their own backgrounds or accents.
 ///
 /// Surfaces follow the Facebook Dark Mode grays; text is white over a light
-/// gray; the single accent is blue. `preferredColorScheme(.dark)` at the app
+/// gray; the single accent is white. `preferredColorScheme(.dark)` at the app
 /// root keeps every screen (and every system control) inside this palette.
 enum BileTheme {
 
@@ -28,10 +28,11 @@ enum BileTheme {
 
     // MARK: Accent & interaction
 
-    /// The one app-wide accent (buttons, toolbar, links, selection).
-    static let tint = Color.blue
+    /// The one app-wide accent (buttons, toolbar, selection): white on the
+    /// dark gray canvas.
+    static let tint = Color.white
     /// Symlinks keep a distinct marker colour.
-    static let link = Color.purple
+    static let link = Color.white
 
     // MARK: Row backgrounds
 

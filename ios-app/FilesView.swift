@@ -6,7 +6,7 @@ import QuickLook
 /// Everything here is plain `FileManager` work — the app contains no sandbox
 /// escape, so paths iOS refuses simply show "Permission denied" until a real
 /// escape ships. The tab keeps the native system look with Liquid Glass
-/// surfaces and a single app-wide blue tint.
+/// surfaces and a single app-wide white accent.
 struct FilesView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
@@ -488,7 +488,7 @@ struct FileRow: View {
         HStack(spacing: 10) {
             if selecting {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(selected ? BileTheme.tint : Color.secondary)
             }
             FileGlyph(entry: entry, size: 26)
             VStack(alignment: .leading, spacing: 2) {
@@ -569,11 +569,9 @@ struct FileGlyph: View {
             }
     }
 
-    /// One unified palette: folders carry the app tint, files stay neutral.
+    /// One unified, monochrome palette — every glyph reads in white on the
+    /// dark gray canvas.
     static func tint(for entry: FileEntry?) -> Color {
-        guard let entry else { return BileTheme.textSecondary }
-        if entry.isDir { return BileTheme.tint }
-        if entry.isLink { return BileTheme.link }
-        return BileTheme.textSecondary
+        BileTheme.tint
     }
 }

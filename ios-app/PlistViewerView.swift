@@ -188,7 +188,7 @@ private struct NodeRow: View {
             if let key, !key.isEmpty {
                 Text(key)
                     .font(.callout.weight(.semibold))
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(BileTheme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }

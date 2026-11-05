@@ -167,7 +167,7 @@ struct AppIcon: View {
             let letter = String(app.name.prefix(1)).uppercased()
             RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
                 .fill(LinearGradient(
-                    colors: [Color.accentColor.opacity(0.9), Color.accentColor.opacity(0.55)],
+                    colors: [BileTheme.elevated, BileTheme.surface],
                     startPoint: .topLeading, endPoint: .bottomTrailing
                 ))
                 .frame(width: size, height: size)
